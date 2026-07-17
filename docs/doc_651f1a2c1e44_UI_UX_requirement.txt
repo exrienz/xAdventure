@@ -1,0 +1,111 @@
+# UX/UI Design Specification: Infinite Narrative Engine
+
+## 1. System Overview
+This application is a text-based adventure engine driven by a Large Language Model (LLM). The backend (Go) manages state persistence, inventory, and health logic, while the frontend delivers a streamlined, "Light Novel" reading experience. The interface prioritizes readability, input validation, and performance on low-resource hardware.
+
+## 2. User Flow
+
+### 2.1. Initialization Flow
+1.  **Landing:** User accesses the web application.
+2.  **Character Creation:** User enters Name, selects Gender, inputs Age, and selects a Genre (Adventure, Romance, Mystery, Sci-Fi).
+3.  **Session Start:** Upon submission, the system initializes a new game session in the database and requests the first story segment from the LLM.
+
+### 2.2. Gameplay Loop
+1.  **Narrative Display:** The system streams the story text to the UI.
+2.  **State Update:** The UI reflects current Health (HP) and Inventory items.
+3.  **Decision Point:** The LLM provides 4 distinct choices (A, B, C, D).
+4.  **User Input:** User selects an option.
+5.  **Validation:** The frontend sends the selection. The backend validates that the input is strictly within the allowed set.
+6.  **Processing:** The backend sends the context + choice to the LLM.
+7.  **State Mutation:** The LLM returns the new story segment and state changes (e.g., `-10 HP`, `+Item: Sword`). The backend updates the database.
+8.  **Repeat:** The new story segment is displayed.
+
+### 2.3. Termination Flow
+1.  **Manual End:** User clicks "Finish Story" or "Export."
+2.  **Automatic End:** Character Health reaches 0 (Death) or a specific narrative conclusion is reached.
+3.  **Export:** The backend compiles the full history and state log into a `.txt` file and triggers a browser download.
+
+## 3. Key Screens and Layout Requirements
+
+### 3.1. Screen: Character Creation
+**Layout:** Centered, single-column card layout on a light background.
+
+**Elements:**
+*   **Header:** Title "Infinite Narrative Engine".
+*   **Form Fields:**
+    *   Name (Text input).
+    *   Gender (Dropdown/Radio buttons).
+    *   Age (Number input).
+    *   Genre (Select dropdown: Adventure, Romance, Cyberpunk, Fantasy, Horror).
+*   **Action:** "Begin Journey" button (Primary CTA).
+
+**Behavior:**
+*   Client-side validation for required fields before sending the API request.
+*   Loading state on button press while the initial LLM request is generated.
+
+### 3.2. Screen: The Game Interface (Main View)
+**Layout:** Two-column layout (Desktop) or stacked (Mobile).
+*   **Left/Top Column (Status):** Sticky sidebar containing character stats.
+*   **Right/Bottom Column (Narrative):** The main scrolling area for story text and choices.
+
+**Elements - Status Panel:**
+*   **Avatar:** A generated placeholder icon based on gender/genre.
+*   **Health Bar:** Visual progress bar (Green > Yellow > Red) + numerical value (e.g., "HP: 85/100").
+*   **Inventory:** A scrollable list of acquired items. Empty state shows "Your pockets are empty."
+
+**Elements - Narrative Area:**
+*   **Story Log:** A container where text is appended. Newest text appears at the bottom.
+*   **Typography:** Serif font for story text to mimic a novel.
+*   **Choice Area:** Distinct section at the bottom of the narrative.
+    *   Four buttons labeled dynamically: [A] [Option Text], [B] [Option Text], etc.
+    *   Keyboard shortcuts: Pressing A, B, C, or D triggers the selection.
+
+**Behavior:**
+*   **Streaming:** Text should appear incrementally (typewriter effect) to mimic LLM generation speed.
+*   **Scroll Auto-follow:** As new text arrives, the window should scroll to the bottom.
+*   **Input Locking:** Disable choice buttons while the LLM is generating the next segment to prevent race conditions.
+
+### 3.3. Screen: Export/Summary
+**Layout:** Modal overlay or a dedicated simple page.
+
+**Elements:**
+*   **Summary Stats:** "Total Turns: X," "Final Status: Alive/Dead."
+*   **Action:** "Download Transcript (.txt)" button.
+*   **Action:** "Start New Story" button.
+
+## 4. Accessibility Requirements
+*   **Contrast:** All text must meet WCAG AA standards on the light theme background.
+*   **Keyboard Navigation:** Full keyboard support. Tab to navigate, Enter to select. Shortcut keys (A, B, C, D) must be announced by screen readers.
+*   **Focus States:** Clear visual indicators (outline/ring) on all interactive elements.
+*   **Semantic HTML:** Use `<article>` for story segments, `<aside>` for the status panel, and `<nav>` for choices.
+
+## 5. Design System Suggestions
+
+### 5.1. Theme Philosophy: "Paper & Ink"
+The aesthetic must be clean, academic, and literary. No dark mode.
+
+### 5.2. Color Palette (Light Theme Only)
+*   **Background:** `#FAFAFA` (Off-white, easier on eyes than pure white).
+*   **Surface/Card Background:** `#FFFFFF` (Pure white).
+*   **Primary Text:** `#2C2C2C` (Dark charcoal, softer than black).
+*   **Secondary Text:** `#555555` (Medium grey for metadata).
+*   **Accent Color (Action):** `#0056b3` (Classic Blue) for primary buttons and links.
+*   **Success/Health:** `#28a745` (Green).
+*   **Danger/Low HP:** `#dc3545` (Red).
+*   **Borders:** `#E0E0E0` (Light grey).
+
+### 5.3. Typography
+*   **Story Text (Serif):** *Merriweather*, *Georgia*, or *Noto Serif*. Size: 18px (base), Line-height: 1.6.
+*   **UI Elements (Sans-Serif):** *Inter*, *Roboto*, or system-ui. Size: 14px-16px.
+*   **Headings:** Sans-serif, bold, distinct weight hierarchy.
+
+### 5.4. Component Details
+*   **Buttons:** Rectangular with slightly rounded corners (4px). No gradients. Flat design with subtle hover lift.
+*   **Status Bar:** A thin container (height: 8px) with a filled inner div representing percentage.
+*   **Inventory Tags:** Pill-shaped backgrounds (`#F0F0F0`) with text centered.
+
+## 6. Technical Constraints & Implementation Notes
+*   **Frontend Framework:** Vanilla JavaScript or HTMX. Avoid heavy SPA frameworks (React/Vue) to keep the binary size small and compatible with edge devices.
+*   **Asset Loading:** Use system fonts to avoid network requests for font files.
+*   **Responsiveness:** CSS Flexbox/Grid. The Status panel moves to the top on mobile screens to ensure stats are always visible.
+*   **Error Handling:** If the LLM fails to generate valid JSON for state updates, display a system message in the narrative area: "The narrator stumbles... (System Error: Invalid State). Please try the last action again."

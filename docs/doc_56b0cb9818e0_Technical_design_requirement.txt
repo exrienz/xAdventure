@@ -1,0 +1,208 @@
+# Technical Design Document: Infinite LLM Adventure
+
+## 1. Clarifying Questions
+
+1.  **State Persistence Scope:** Should the game state (health, inventory) persist if the user closes the browser and returns later, or is the session ephemeral (lost on refresh)?
+2.  **LLM Model Selection:** Do you have a specific OpenAI model preference (e.g., `gpt-4o` for better logic vs `gpt-3.5-turbo` for cost/speed), or should this be configurable?
+3.  **Story Termination:** You mentioned "never ending," but also "downloadable when story finish." Is there a specific "win/loss" condition, or does the user manually click "Finish Story" to generate the log?
+4.  **Concurrency Limits:** "10+ simultaneous users" is low, but do you anticipate spikes? Should we implement a simple semaphore or queue to prevent the OpenAI API rate limits from being hit during traffic bursts?
+
+## 2. Assumptions
+
+*   **Session Persistence:** Sessions are ephemeral. If the user disconnects, the game state is lost (unless we implement a "Save Code" system, but we will stick to in-memory/DB session binding for simplicity).
+*   **LLM Integration:** We will use OpenAI's API with **JSON Mode** (or Structured Outputs) to ensure the backend receives deterministic data for game mechanics (Health, Inventory) rather than parsing natural text.
+*   **Database:** SQLite is sufficient for this workload and fits the "self-hosted/edge" requirement perfectly. We will enable Write-Ahead Logging (WAL) for concurrency.
+*   **Frontend:** A lightweight server-side rendered HTML/JS frontend (using Go templates or HTMX) to keep the architecture simple and dependency-free.
+*   **State Management:** The backend maintains the "Source of Truth" for game state. The LLM acts as a calculator for state deltas (e.g., "Health -10"), which the backend applies to the current state.
+
+## 3. System Architecture Overview
+
+The system is a **Modular Monolith**. It consists of a single Go binary handling the HTTP server, game logic, and database connection. It communicates externally only with the OpenAI API.
+
+**Flow:**
+1.  **Client** sends initial setup (Name, Genre).
+2.  **Server** initializes `GameState` struct in DB.
+3.  **Server** sends prompt + current state to **OpenAI**.
+4.  **OpenAI** returns JSON: `{ narrative: "...", choices: ["A", "B"...], state_delta: { health: -5, inventory_add: "Potion" } }`.
+5.  **Server** applies delta, saves new state & narrative to DB.
+6.  **Client** renders new text and buttons.
+7.  **Client** sends choice (e.g., "B").
+8.  **Loop** repeats.
+
+## 4. Architecture Diagram
+
+```text
++-------------------+      HTTP/JSON      +-------------------------+
+|   User Browser    | <-----------------> |   Go Backend (Monolith)  |
+| (HTML/JS/HTMX)    |                     |-------------------------|
++-------------------+                     | - HTTP Router           |
+                                          | - Game Engine (Logic)   |
+                                          | - LLM Client (OpenAI)   |
+                                          | - State Manager         |
+                                          +-------------------------+
+                                                      |
+                                                      | SQL (WAL Mode)
+                                                      v
+                                          +-------------------------+
+                                          |   SQLite Database       |
+                                          | (Sessions, Story Logs)  |
+                                          +-------------------------+
+                                                      ^
+                                                      |
+                                                      | HTTPS (API Calls)
+                                                      |
+                                          +-------------------------+
+                                          |   OpenAI API            |
+                                          | (LLM Inference)         |
+                                          +-------------------------+
+```
+
+## 5. Repository / Monorepo Structure
+
+```text
+/infinite-adventure
+├── cmd/
+│   └── server/
+│       └── main.go           (Entry point)
+├── internal/
+│   ├── config/               (Env vars loading)
+│   ├── handler/              (HTTP handlers)
+│   │   ├── game.go
+│   │   └── middleware.go
+│   ├── model/                (Data structures)
+│   │   ├── game.go
+│   │   └── llm.go
+│   ├── repository/           (Database access)
+│   │   └── sqlite.go
+│   └── service/              (Business logic)
+│       ├── llm.go            (OpenAI client)
+│       └── engine.go         (Game loop logic)
+├── web/
+│   ├── static/               (CSS, JS)
+│   └── templates/            (HTML templates)
+├── migrations/               (SQL schema)
+├── .env                      (API Keys, DB Path)
+├── Dockerfile
+└── docker-compose.yml
+```
+
+## 6. Core Components
+
+### A. HTTP Handler (`internal/handler`)
+*   **POST /api/start**: Validates user input, creates a new `GameSession` record, triggers the first LLM generation.
+*   **POST /api/turn**: Validates input (must be A, B, C, or D). Loads session, sends previous choice to LLM, updates state.
+*   **GET /api/download**: Retrieves the full story log from the DB and streams a `.txt` file to the client.
+*   **GET /**: Serves the game UI.
+
+### B. Game Engine (`internal/service/engine`)
+*   **State Application**: Takes the `state_delta` from the LLM and applies it to the current `GameState`.
+    *   *Logic:* `CurrentHealth += DeltaHealth`. If `CurrentHealth <= 0`, trigger Game Over state.
+*   **Prompt Construction**: Dynamically builds the system prompt based on the selected Genre (e.g., Romance vs. Horror) and injects the current JSON state into the user message so the LLM knows the user's inventory.
+
+### C. LLM Service (`internal/service/llm`)
+*   **Client**: Wraps the OpenAI SDK.
+*   **Request**: Sends `messages` history + `response_format` = `json_object`.
+*   **Response Parsing**: Unmarshals the JSON response into a strict struct. If parsing fails, returns a generic error (fallback).
+
+### D. Repository (`internal/repository`)
+*   **SQLite**: Uses `database/sql` with the `mattn/go-sqlite3` driver.
+*   **Methods**: `CreateSession`, `GetSession`, `UpdateSession`, `AppendStoryLog`.
+
+## 7. Data Model Strategy
+
+### Database Schema (SQLite)
+
+**Table: sessions**
+*   `id` (TEXT/UUID, PK)
+*   `created_at` (DATETIME)
+*   `user_name` (TEXT)
+*   `genre` (TEXT)
+*   `state` (JSON) - Stores current HP, Inventory, Stats.
+*   `status` (TEXT) - 'active', 'finished', 'game_over'.
+
+**Table: story_logs**
+*   `id` (INTEGER, PK)
+*   `session_id` (TEXT, FK)
+*   `turn_number` (INTEGER)
+*   `content` (TEXT) - The narrative text generated by LLM.
+*   `choice_made` (TEXT) - The option the user picked.
+*   `timestamp` (DATETIME)
+
+### Go Structs
+
+```go
+type GameState struct {
+    Health    int      `json:"health"`
+    MaxHealth int      `json:"max_health"`
+    Inventory []string `json:"inventory"`
+    Stats     map[string]int `json:"stats"`
+}
+
+type LLMResponse struct {
+    Narrative   string            `json:"narrative"`
+    Choices     map[string]string `json:"choices"` // {"A": "Go left", "B": "Go right"}
+    StateDelta  StateDelta        `json:"state_delta"`
+}
+
+type StateDelta struct {
+    HealthChange int      `json:"health_change"`
+    AddItems     []string `json:"add_items"`
+    RemoveItems  []string `json:"remove_items"`
+}
+```
+
+## 8. Concurrency Strategy (Go)
+
+*   **Model:** One Goroutine per Request. The Go HTTP server handles this by default.
+*   **Database:** SQLite with WAL mode (`?mode=rwc&_journal_mode=WAL`) allows multiple readers and one writer concurrently. Given the "10+ user" constraint, this is sufficient.
+*   **LLM Rate Limiting:** To prevent burning through API quota or hitting rate limits, we use a buffered channel as a semaphore.
+    *   Example: `sem := make(chan struct{}, 5)`. Before calling OpenAI, `sem <- struct{}{}`; after response, `<-sem`. This limits concurrent LLM calls to 5.
+*   **Context:** Use `context.WithTimeout` for all LLM calls to prevent hanging goroutines if the API lags.
+
+## 9. Deployment Layout (docker-compose)
+
+```yaml
+version: '3.8'
+
+services:
+  adventure-app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DB_PATH=/data/adventure.db
+    volumes:
+      - adventure_data:/data
+    restart: unless-stopped
+
+volumes:
+  adventure_data:
+```
+
+*   **Dockerfile**: Multi-stage build.
+    *   Stage 1: Build Go binary.
+    *   Stage 2: Use `distroless` or `alpine` (for CGO compatibility with SQLite) to run the binary. *Note: SQLite requires CGO, so we need a base image with gcc or a static binary build. Using `alpine` with `apk add build-base` is easiest for compatibility.*
+
+## 10. Performance Strategy
+
+*   **Connection Pooling:** `db.SetMaxOpenConns(25)` and `db.SetMaxIdleConns(5)` to manage SQLite connections efficiently.
+*   **JSON Streaming:** We won't stream the response to the client (we wait for the full LLM JSON to ensure validity), but we will keep the in-memory processing fast.
+*   **Prompt Caching:** The System Prompt (Genre rules) is static. We can cache the prompt construction logic, though the overhead is minimal compared to the network call.
+*   **Resource Limits:** The Go binary is lightweight. The main resource consumer will be memory if story logs become massive. We mitigate this by storing logs in the DB and only loading the current state into memory during turns.
+
+## 11. Security Strategy
+
+*   **Input Validation:**
+    *   Strict regex for choice selection: `^(A|B|C|D)$`.
+    *   Sanitize user name/genre to prevent injection (though parameterized queries prevent SQL injection).
+*   **API Key Security:** Loaded from environment variables, never hardcoded. Passed only to the LLM service.
+*   **Rate Limiting:** Implement a simple IP-based token bucket rate limiter in the `middleware` to prevent abuse of the OpenAI API key.
+*   **Error Handling:** Do not return raw internal errors or LLM prompts to the client. Return generic "Game Error" messages.
+
+## 12. Scaling & Evolution
+
+*   **Vertical Scaling:** Increase RAM/CPU on the host. SQLite handles high read throughput well.
+*   **Horizontal Scaling (Future):** If moving to Kubernetes, replace SQLite with PostgreSQL (change the `repository` implementation). The `service` layer remains unchanged due to interface abstraction.
+*   **Feature Addition - Images:** If adding image generation (DALL-E), offload this to a background worker (channel/worker pool) so the user text flow isn't blocked by image generation time.
+*   **Feature Addition - Auth:** Add JWT middleware to `internal/handler` to persist stories across devices.

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buku Cerita Interaktif</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="/static/kids_style.css?v=8">
+    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="kids-mode">
+
+    <!-- ═══ INIT SCREEN ═══ -->
+    <div id="init-screen" class="screen init-screen">
+        <header class="init-header">
+            <h1 class="fun-title">Buku Cerita Saya!</h1>
+            <p class="subtitle">Mari membaca bersama.</p>
+        </header>
+
+        <form id="start-form" class="init-form">
+            <div class="form-row">
+                <div class="form-col">
+                    <label for="name" class="fun-label">Nama:</label>
+                    <input type="text" id="name" name="name" required placeholder="Ali" maxlength="20" class="fun-input">
+                </div>
+                <div class="form-col form-col-small">
+                    <label for="age" class="fun-label">Umur:</label>
+                    <input type="number" id="age" name="age" required min="4" max="8" value="6" class="fun-input">
+                </div>
+                <div class="form-col form-col-small">
+                    <label for="gender" class="fun-label">Jantina:</label>
+                    <select id="gender" name="gender" class="fun-input">
+                        <option value="Lelaki">Lelaki</option>
+                        <option value="Perempuan">Perempuan</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="genre-section">
+                <label class="fun-label">Pilih Jenis Cerita <span class="hint-number">(tekan nombor)</span>:</label>
+                <div id="genre-grid" class="genre-grid">
+                    <!-- Genre buttons injected by JS -->
+                </div>
+            </div>
+
+            <button type="submit" id="start-btn" class="btn btn-primary fun-btn">MULA CERITA!</button>
+            <div id="init-error" class="error-msg"></div>
+
+            <div id="loading" class="loading-overlay" style="display:none;">
+                <div class="spinner"></div>
+                <p>Menyiapkan cerita...</p>
+            </div>
+        </form>
+    </div>
+
+    <!-- ═══ GAME SCREEN ═══ -->
+    <div id="game-screen" class="screen game-screen" style="display: none;">
+        <header class="game-header">
+            <h2 id="chapter-title" class="fun-chapter">Bab 1</h2>
+            <div id="turn-indicator" class="turn-indicator"></div>
+        </header>
+
+        <div class="story-main">
+            <div class="story-left">
+                <div id="story-image-frame" class="story-image-frame" style="display:none;">
+                    <div id="image-loading" class="image-loading" aria-live="polite">
+                        <div class="spinner image-spinner"></div>
+                        <p>Menyiapkan gambar...</p>
+                    </div>
+                    <img id="story-image" class="story-image" alt="Gambar cerita semasa" style="display:none;">
+                </div>
+                <div id="character-panel" class="character-panel" style="display:none;"></div>
+            </div>
+            <div id="story-log" class="story-log fun-story-log">
+                <!-- Latest story segment appears here -->
+            </div>
+        </div>
+
+        <div id="story-error" class="error-msg retry-panel" style="display:none;">
+            <p id="story-error-text"></p>
+            <button id="retry-btn" type="button" class="btn btn-primary fun-btn retry-btn">Cuba Lagi</button>
+        </div>
+
+        <div id="choices-container" class="choices-container fun-choices">
+            <!-- Choice buttons appear here -->
+        </div>
+    </div>
+
+    <script src="/static/kids_app.js?v=8"></script>
+</body>
+</html>

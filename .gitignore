@@ -1,0 +1,27 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets/
+*.secret
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Compiled binaries
+/server
+/app
+
+# Go IDE / OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Test artifacts
+internal/repository/test_*.db

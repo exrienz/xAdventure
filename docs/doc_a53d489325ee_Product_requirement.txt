@@ -1,0 +1,95 @@
+# Product Requirements Document: Infinite Narrative Engine
+
+## 1. Product Overview
+**Product Name:** Infinite Narrative Engine (INE)
+**Purpose:** A self-hosted, text-based interactive fiction game engine powered by Large Language Models (LLMs). The system generates dynamic, "never-ending" adventure stories where user choices drive the narrative and character state.
+**Target Environment:** Self-hosted edge hardware (Raspberry Pi, NAS, Home Servers) using Docker.
+**Target Users:** Readers, gamers, and interactive fiction enthusiasts who want a personalized, replayable adventure experience.
+
+## 2. User Personas
+*   **The Player:** Wants an immersive story experience with minimal setup. Values responsiveness and narrative coherence.
+*   **The Administrator:** Hosts the server on personal hardware. Values low resource usage, stability, and ease of configuration (API keys, genres).
+
+## 3. Functional Requirements
+
+### 3.1. Initialization (Character Creation)
+The application must present a setup interface where the user defines:
+*   **Name:** Free text input.
+*   **Age:** Integer input.
+*   **Gender:** Free text or selection (passed to LLM context).
+*   **Genre:** Selection (e.g., Fantasy, Sci-Fi, Romance, Cyberpunk, Mystery).
+
+### 3.2. Core Gameplay Loop
+The system operates on a turn-based request/response cycle:
+
+1.  **Context Generation:** The backend aggregates the current story history, character state (HP, Inventory), and the previous turn's outcome into a prompt for the LLM.
+2.  **LLM Request:** The backend sends a prompt to the OpenAI API (configured via `.env`).
+3.  **Response Processing:**
+    *   The LLM generates the next narrative segment.
+    *   The LLM generates exactly 4 distinct choices (labeled A, B, C, D).
+    *   The LLM acts as a "Game Master" to determine state changes (Health modification, Inventory updates) based on the narrative context.
+4.  **Display:** The frontend renders the story text and the four clickable options.
+5.  **Input Collection:** User selects an option.
+6.  **Validation:** The backend strictly validates that the input matches the allowed set `[A, B, C, D]`. Any other input is rejected with an error.
+7.  **State Update:** The backend applies the state changes calculated by the LLM (e.g., HP -10) and records the choice.
+
+### 3.3. State Management (Inventory & Health)
+*   **Health Points (HP):** Tracked numerically. If HP drops to 0, the story concludes with a "Game Over" state.
+*   **Inventory:** A list of strings representing items. The LLM can add or remove items based on story events.
+*   **Mechanic Logic:** To ensure the game mechanics adapt to the genre (e.g., romance might track "Relationship Status" instead of HP, or Sci-Fi might track "Ammo"), the backend will request the LLM to return state changes in a structured JSON format. This allows the LLM to autonomously decide mechanics while keeping the backend logic deterministic.
+
+### 3.4. Session Persistence & Export
+*   **Recording:** Every turn (narrative text, choice made, resulting state) is stored in the database associated with a unique Session ID.
+*   **Export:** At any point, or upon story completion/death, the user may trigger a "Download" action. The backend compiles the session history into a plain text (`.txt`) file formatted for readability and serves it to the client.
+
+## 4. Non-Functional Requirements
+
+### 4.1. Performance & Scalability
+*   **Concurrency:** The system must support at least 10 simultaneous active users (sessions) without degradation.
+*   **Latency:** The primary bottleneck is the LLM API. Backend processing overhead (validation, DB writes) must remain under 50ms per request.
+*   **Resource Efficiency:** The application must run smoothly on resource-constrained hardware (e.g., Raspberry Pi 4 with 4GB RAM). Idle memory usage should be minimal.
+
+### 4.2. Security
+*   **Input Validation:** All user inputs must be sanitized. Specifically, choice selection must be validated server-side against the allowed options to prevent injection or logic bypass.
+*   **API Key Security:** OpenAI API keys must be loaded exclusively from environment variables (`.env`) and never exposed in logs or client-side code.
+*   **Error Handling:** Errors from the LLM API (rate limits, outages) must be handled gracefully without crashing the server.
+
+### 4.3. Reliability & Correctness
+*   **Deterministic State:** While the story is generative, the application of game mechanics (math, inventory list management) must be deterministic based on the LLM's output.
+*   **Data Integrity:** Story logs must not be lost between turns. SQLite will be used with Write-Ahead Logging (WAL) mode enabled to handle concurrent reads/writes safely.
+
+## 5. Technical Architecture Strategy
+
+### 5.1. System Design
+*   **Pattern:** Modular Monolith.
+*   **Language:** Go (Golang).
+*   **Database:** SQLite (embedded). This eliminates the need for a separate database container, reducing complexity and resource usage for self-hosted deployments.
+
+### 5.2. LLM Integration Strategy
+To solve the challenge of "Autonomous LLM state management" vs. "Deterministic Backend," the system will use **Structured Outputs (JSON Mode)**.
+
+The prompt will instruct the LLM to return a JSON object containing:
+1.  `story_text`: The narrative.
+2.  `choices`: Array of 4 strings.
+3.  `state_update`: Object containing `hp_delta` (integer) and `inventory_changes` (array of add/remove strings).
+
+**Backend Logic:**
+1.  Send prompt.
+2.  Parse JSON response.
+3.  Validate JSON schema.
+4.  Apply `state_update` to the current in-memory session state.
+5.  Persist new state to SQLite.
+
+This approach allows the LLM to tailor mechanics (e.g., "You feel heartbroken -5 Mood" in a Romance genre) while the Go backend ensures the data structure remains valid.
+
+### 5.3. Data Model (SQLite Schema)
+*   `sessions`: `id` (UUID), `created_at`, `genre`, `character_name`, `current_hp`, `inventory_json`, `is_active`.
+*   `story_logs`: `id`, `session_id`, `turn_number`, `narrative_text`, `choice_made`, `timestamp`.
+
+### 5.4. Deployment
+*   **Containerization:** Dockerfile using a multi-stage build (Alpine Linux or Distroless) to minimize image size and ensure ARM compatibility.
+*   **Configuration:** `docker-compose.yml` to handle volume mounting (for SQLite persistence) and environment variable injection (`.env` file).
+
+## 6. Open Questions & Constraints
+*   **Context Window:** To prevent the LLM context from growing infinitely, the backend must implement a "summarization" or "truncation" strategy once the token count approaches the model's limit (e.g., keeping the last N turns or a running summary).
+*   **Cost:** The user is responsible for their own OpenAI API costs. The system should implement a basic usage tracker (tokens used per session) visible to the user.

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Narrative Engine</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="/static/style.css?v=3">
+    <script>
+        (function(){
+            if (sessionStorage.getItem('_ine_reload_done_v3')) return;
+            document.addEventListener('DOMContentLoaded', function(){
+                if (!document.getElementById('archetype')) {
+                    sessionStorage.setItem('_ine_reload_done_v3', '1');
+                    if (window.location.reload.length > 0) {
+                        window.location.reload(true);
+                    } else {
+                        window.location.href = window.location.href.split('?')[0] + '?_=' + Date.now();
+                    }
+                }
+            });
+        })();
+    </script>
+</head>
+<body>
+
+    <div id="init-screen" class="container card">
+        <header>
+            <h1>Infinite Narrative Engine</h1>
+            <p class="subtitle">Forge your own serialized light novel.</p>
+            <a class="kids-nav-link" href="/kids">Cerita Kanak-kanak</a>
+        </header>
+        
+        <form id="start-form">
+            <div class="form-group">
+                <label for="name">Character Name</label>
+                <input type="text" id="name" name="name" required placeholder="E.g., Kaelen" maxlength="50">
+            </div>
+
+            <div class="form-group row">
+                <div class="col">
+                    <label for="age">Age</label>
+                    <input type="number" id="age" name="age" required min="10" max="150" value="21">
+                </div>
+                <div class="col">
+                    <label for="gender">Gender</label>
+                    <select id="gender" name="gender">
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-Binary">Non-Binary</option>
+                        <option value="Unknown">Unknown</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group row">
+                <div class="col">
+                    <label for="genre">Genre</label>
+                    <select id="genre" name="genre">
+                        <option value="Adventure">Fantasy Adventure</option>
+                        <option value="Romance">Romance</option>
+                        <option value="Cyberpunk">Cyberpunk</option>
+                        <option value="Horror">Horror</option>
+                        <option value="Sci-Fi">Sci-Fi</option>
+                        <option value="Mystery">Mystery</option>
+                        <option value="Post-Apocalyptic">Post-Apocalyptic</option>
+                        <option value="Supernatural">Supernatural</option>
+                        <option value="Steampunk">Steampunk</option>
+                        <option value="Xianxia">Xianxia</option>
+                        <option value="Isekai">Isekai</option>
+                        <option value="Noir">Noir</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <label for="archetype">Archetype</label>
+                    <select id="archetype" name="archetype">
+                        <option value="Hero">Hero</option>
+                        <option value="Betrayer">Betrayer</option>
+                        <option value="Trickster">Trickster</option>
+                        <option value="Survivor">Survivor</option>
+                        <option value="Seeker">Seeker</option>
+                        <option value="Caretaker">Caretaker</option>
+                        <option value="Outcast">Outcast</option>
+                        <option value="Chosen">Chosen</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="seed">Story Seed (optional)</label>
+                <input type="text" id="seed" name="seed" placeholder="Leave blank for a random seed" maxlength="50">
+            </div>
+
+            <button type="submit" class="btn-primary" id="btn-start">Begin Journey</button>
+            <div id="init-loading" class="hidden">Summoning the narrator...</div>
+        </form>
+    </div>
+
+    <div id="game-screen" class="container hidden">
+        <div class="game-layout">
+            
+            <aside class="status-panel">
+                <div class="avatar-box">
+                    <div id="avatar" class="avatar-icon">👤</div>
+                    <h2 id="char-name-display">Name</h2>
+                    <span id="archetype-display" class="archetype-badge">Archetype</span>
+                </div>
+
+                <div class="stat-group">
+                    <div class="stat-header">
+                        <span>HP</span>
+                        <span id="hp-text">100 / 100</span>
+                    </div>
+                    <div class="hp-bar-container">
+                        <div id="hp-bar" class="hp-bar-fill" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <div class="stat-group row compact">
+                    <div class="stat-box">
+                        <span class="stat-label">Karma</span>
+                        <span id="karma-text" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">Fate</span>
+                        <span id="fate-text" class="stat-value">1</span>
+                    </div>
+                </div>
+
+                <div class="stat-group">
+                    <h3>Inventory</h3>
+                    <div id="inventory-list" class="inventory-list">
+                        <div class="empty-state">Your pockets are empty.</div>
+                    </div>
+                </div>
+
+                <div class="stat-group">
+                    <h3>Stats</h3>
+                    <div id="stats-list" class="tag-list">
+                        <div class="empty-state">None yet.</div>
+                    </div>
+                </div>
+
+                <div class="stat-group">
+                    <h3>Bonds</h3>
+                    <div id="bonds-list" class="tag-list">
+                        <div class="empty-state">None yet.</div>
+                    </div>
+                </div>
+
+                <div class="stat-group">
+                    <h3>Reputation</h3>
+                    <div id="reputation-list" class="tag-list">
+                        <div class="empty-state">None yet.</div>
+                    </div>
+                </div>
+
+                <div class="stat-group actions">
+                    <button id="btn-export" class="btn-secondary">Download Tale</button>
+                    <button id="btn-restart" class="btn-danger">End Journey</button>
+                </div>
+            </aside>
+
+            <main class="narrative-area">
+                <div id="story-log" class="story-log" role="log" aria-live="polite" aria-atomic="false">
+                </div>
+                
+                <div id="choice-area" class="choice-area hidden" role="radiogroup" aria-label="Choose your next action">
+                    <button class="choice-btn" data-index="0"><span class="key">A</span> <span class="text"></span></button>
+                    <button class="choice-btn" data-index="1"><span class="key">B</span> <span class="text"></span></button>
+                    <button class="choice-btn" data-index="2"><span class="key">C</span> <span class="text"></span></button>
+                    <button class="choice-btn" data-index="3"><span class="key">D</span> <span class="text"></span></button>
+                </div>
+
+                <div id="turn-loading" class="hidden loading-indicator">The narrator is thinking...</div>
+            </main>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>
