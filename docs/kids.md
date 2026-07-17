@@ -20,9 +20,12 @@ When enabled:
 
 Server-side word caps are enforced after generation:
 
-- Age 4-5: max 20 words, very simple vocabulary
-- Age 6-7: max 40 words, simple sentences
-- Age 8+: max 80 words, slightly richer vocabulary
+- Age 4: 15-30 words per page
+- Age 5: 25-50 words per page
+- Age 6: 40-80 words per page
+- Age 7: 70-120 words per page
+- Age 8: 100-180 words per page
+- The kids storybook uses a 10-page arc so the story opens gently, builds naturally, and resolves cleanly instead of jumping ahead too fast.
 
 ## Image prompt logic
 

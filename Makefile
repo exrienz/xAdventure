@@ -20,7 +20,7 @@ docker-build:
 	docker compose build
 
 docker-up:
-	docker compose up -d
+	docker compose up --build -d
 
 docker-down:
 	docker compose down

@@ -14,12 +14,8 @@ var ValidGenres = []string{
 	"Adventure", "Romance", "Cyberpunk", "Horror", "Sci-Fi", "Mystery",
 	"Post-Apocalyptic", "Supernatural", "Steampunk", "Xianxia", "Isekai", "Noir",
 	// Kids genres
-	"Kids",
-	"Pengembaraan", "Fantasi", "Dongeng Klasik", "Fabel", "Cerita Haiwan",
-	"Cerita Sebelum Tidur", "Edukasi", "Persahabatan", "Keluarga", "Humor",
-	"Misteri Kanak-kanak", "Fiksyen Sains Kanak-kanak", "Fiksyen Sejarah",
-	"Alam dan Persekitaran", "Membesar", "Budaya dan Folklor", "Mistik",
-	"Cerita Interaktif", "Sains dan Teknologi", "Inspirasi",
+	"Pengembaraan", "Fantasi", "Cerita Haiwan", "Kisah Dongeng", "Keluarga",
+	"Kelakar", "Persahabatan", "Inspirasi", "Sains & Teknologi", "Mistik/Misteri",
 }
 
 // ValidArchetypes is the allowlist of supported archetypes.
@@ -42,27 +38,16 @@ var GenreArchetypeMatrix = map[string][]string{
 	"Isekai":           {"Chosen", "Hero", "Trickster", "Caretaker", "Survivor", "Outcast"},
 	"Noir":             {"Seeker", "Survivor", "Betrayer", "Outcast", "Trickster"},
 	// Kids genres — all support the same safe subset.
-	"Kids":                      {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Pengembaraan":              {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Fantasi":                   {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Dongeng Klasik":            {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Fabel":                     {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Cerita Haiwan":             {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Cerita Sebelum Tidur":      {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Edukasi":                   {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Persahabatan":              {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Keluarga":                  {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Humor":                     {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Misteri Kanak-kanak":       {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Fiksyen Sains Kanak-kanak": {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Fiksyen Sejarah":           {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Alam dan Persekitaran":     {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Membesar":                  {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Budaya dan Folklor":        {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Mistik":                    {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Cerita Interaktif":         {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Sains dan Teknologi":       {"Hero", "Trickster", "Caretaker", "Seeker"},
-	"Inspirasi":                 {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Pengembaraan":      {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Fantasi":           {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Cerita Haiwan":     {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Kisah Dongeng":     {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Keluarga":          {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Kelakar":           {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Persahabatan":      {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Inspirasi":         {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Sains & Teknologi": {"Hero", "Trickster", "Caretaker", "Seeker"},
+	"Mistik/Misteri":    {"Hero", "Trickster", "Caretaker", "Seeker"},
 }
 
 func IsValidGenre(g string) bool {
@@ -76,12 +61,8 @@ func IsValidGenre(g string) bool {
 
 func IsKidsGenre(g string) bool {
 	switch strings.ToLower(g) {
-	case "kids",
-		"pengembaraan", "fantasi", "dongeng klasik", "fabel", "cerita haiwan",
-		"cerita sebelum tidur", "edukasi", "persahabatan", "keluarga", "humor",
-		"misteri kanak-kanak", "fiksyen sains kanak-kanak", "fiksyen sejarah",
-		"alam dan persekitaran", "membesar", "budaya dan folklor", "mistik",
-		"cerita interaktif", "sains dan teknologi", "inspirasi":
+	case "pengembaraan", "fantasi", "cerita haiwan", "kisah dongeng", "keluarga",
+		"kelakar", "persahabatan", "inspirasi", "sains & teknologi", "mistik/misteri":
 		return true
 	default:
 		return false
@@ -156,6 +137,7 @@ type GameState struct {
 	Archetype     string         `json:"archetype"`
 	PlotTwists    int            `json:"plot_twists"`
 	ChapterNumber int            `json:"chapter_number"`
+	VisualSetting string         `json:"visual_setting,omitempty"`
 	// Entities tracks named characters/creatures and their relationships for consistency.
 	Entities map[string]Entity `json:"entities"`
 }

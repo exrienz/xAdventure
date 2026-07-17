@@ -1,6 +1,8 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      target: dev
     ports:
       - "8001:8001"
     environment:
@@ -9,7 +11,12 @@ services:
       - OPENAI_API_BASE=https://llm.code-x.my/v1
       - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
-      - OPENAI_IMAGE_MODEL=${OPENAI_IMAGE_MODEL:-gpt-image-1}
+      - KIDS_LLM_API_BASE=${KIDS_LLM_API_BASE}
+      - KIDS_LLM_API_KEY=${KIDS_LLM_API_KEY}
+      - KIDS_LLM_MODEL=${KIDS_LLM_MODEL}
+      - IMAGEROUTER_API_BASE=${IMAGEROUTER_API_BASE:-https://api.imagerouter.io/v1/openai}
+      - IMAGEROUTER_API_KEY=${IMAGEROUTER_API_KEY}
+      - IMAGEROUTER_MODEL=${IMAGEROUTER_MODEL:-imagerouter/auto-image}
       - LLM_TIMEOUT_SEC=60
       - LLM_MAX_RETRIES=2
       - LLM_TEMPERATURE=0.85
@@ -17,10 +24,14 @@ services:
       - REQUEST_MAX_BYTES=1048576
       - FEATURE_FLAGS=novel_gen_v2_prompt_fix,kids_mode,kids_storybook_v2,enable_dynamic_kids_stories,syllable_coloring
       - FEATURE_ROLLOUT=enhanced_narrative_logic=10
-      - KIDS_LLM_MODEL=${KIDS_LLM_MODEL}
     volumes:
+      - .:/app
       - adventure_data:/data
+      - go_build_cache:/root/.cache/go-build
+      - go_mod_cache:/go/pkg/mod
     restart: unless-stopped
 
 volumes:
   adventure_data:
+  go_build_cache:
+  go_mod_cache:

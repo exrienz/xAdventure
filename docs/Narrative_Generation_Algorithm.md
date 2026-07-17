@@ -57,7 +57,7 @@ Each generation logs:
 
 ### 6. Safety and Input Validation
 
-- `IsValidNameRequest` rejects empty names, overly long names, and prompt-injection patterns (`ignore`, `disregard`, `system prompt`, markdown fences, URLs, etc.). Invalid names fall back to `Traveler`.
+- `IsValidNameRequest` rejects empty names, overly long names, and prompt-injection patterns (`ignore`, `disregard`, `system prompt`, markdown fences, URLs, etc.). Invalid names fall back to a procedurally generated safe name.
 - `SafetyFilter` masks NSFW story content and rejects profane/slur names before they are recorded.
 
 ## API
@@ -66,7 +66,7 @@ Each generation logs:
 
 ```json
 {
-  "name": "Ali",
+  "name": "NamaWatak",
   "age": 4,
   "gender": "Lelaki",
   "genre": "Misteri Dongeng",

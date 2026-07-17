@@ -29,11 +29,14 @@ body.kids-mode {
     color: var(--text-primary);
     margin: 0;
     padding: 0;
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1.5;
-    height: 100vh;
-    overflow: hidden;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
     box-sizing: border-box;
+    -webkit-text-size-adjust: 100%;
 }
 
 *, *::before, *::after {
@@ -44,11 +47,12 @@ body.kids-mode {
 
 .screen {
     width: 100%;
-    height: 100vh;
-    padding: 16px 24px;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* ═══ INIT SCREEN ═══ */
@@ -78,11 +82,11 @@ body.kids-mode {
 }
 
 .init-form {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    overflow: hidden;
+    overflow: visible;
     max-width: 900px;
     width: 100%;
     margin: 0 auto;
@@ -129,18 +133,18 @@ body.kids-mode {
 /* ═══ GENRE GRID ═══ */
 
 .genre-section {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .genre-grid {
-    flex: 1;
+    flex: 1 1 auto;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-    overflow-y: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    overflow-y: visible;
     padding: 4px;
     border-radius: 12px;
 }
@@ -155,10 +159,11 @@ body.kids-mode {
     border-radius: 12px;
     cursor: pointer;
     font-family: var(--font-kids);
-    font-size: 0.95em;
+    font-size: 1rem;
     text-align: left;
     transition: all 0.15s;
-    min-height: 48px;
+    min-height: 56px;
+    touch-action: manipulation;
 }
 
 .genre-btn:hover {
@@ -199,9 +204,9 @@ body.kids-mode {
 .fun-btn {
     background-color: var(--choice-pink);
     color: white;
-    font-size: 1.3em;
+    font-size: 1.1rem;
     font-weight: bold;
-    padding: 12px 40px;
+    padding: 14px 24px;
     border: none;
     border-radius: 20px;
     cursor: pointer;
@@ -211,6 +216,8 @@ body.kids-mode {
     margin-top: 4px;
     font-family: var(--font-kids);
     flex-shrink: 0;
+    min-height: 52px;
+    touch-action: manipulation;
 }
 
 .fun-btn:disabled {
@@ -228,24 +235,26 @@ body.kids-mode {
 /* ═══ GAME SCREEN ═══ */
 
 .game-screen {
-    max-width: 1100px;
+    max-width: 1280px;
     margin: 0 auto;
+    gap: 12px;
 }
 
 .story-main {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
-    gap: 16px;
-    min-height: 0;
-    overflow: hidden;
+    flex-direction: column;
+    gap: 14px;
+    min-height: auto;
+    overflow: visible;
 }
 
 .story-left {
-    flex: 0 0 38%;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    min-height: 0;
+    gap: 10px;
+    min-height: auto;
 }
 
 .game-header {
@@ -253,9 +262,10 @@ body.kids-mode {
     flex-shrink: 0;
     padding: 4px 0;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 8px 14px;
 }
 
 .fun-chapter {
@@ -273,14 +283,17 @@ body.kids-mode {
 
 .fun-story-log {
     background: white;
-    padding: 16px 20px;
+    padding: 16px;
     border-radius: 16px;
     border: 4px dashed #66ccff;
-    flex: 1;
+    flex: 0 0 auto;
     overflow-y: auto;
-    font-size: 1.1em;
-    line-height: 1.6;
-    min-height: 0;
+    font-size: 1rem;
+    line-height: 1.65;
+    min-height: 160px;
+    max-height: min(38vh, 320px);
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .fun-story-log p {
@@ -294,7 +307,7 @@ body.kids-mode {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-top: 4px;
+    padding: 4px 0 12px;
 }
 
 .fun-choices button {
@@ -304,8 +317,8 @@ body.kids-mode {
     width: 100%;
     background-color: var(--choice-green);
     color: white;
-    font-size: 1.1em;
-    padding: 12px 16px;
+    font-size: 1rem;
+    padding: 14px 16px;
     border: none;
     border-radius: 14px;
     cursor: pointer;
@@ -313,6 +326,8 @@ body.kids-mode {
     font-family: var(--font-kids);
     text-align: left;
     transition: all 0.1s;
+    min-height: 56px;
+    touch-action: manipulation;
 }
 
 .fun-choices button:active {
@@ -414,9 +429,21 @@ body.kids-mode {
 @media (min-width: 1200px) and (min-height: 700px) {
     body.kids-mode {
         font-size: 24px;
+        overflow: hidden;
+    }
+    .screen {
+        height: 100vh;
+        height: 100dvh;
+        padding: 16px 24px;
+        overflow: hidden;
     }
     .fun-title {
         font-size: 2.8em;
+    }
+    .genre-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        overflow-y: auto;
     }
     .genre-btn {
         font-size: 1.05em;
@@ -424,23 +451,65 @@ body.kids-mode {
     }
     .fun-story-log {
         font-size: 1.25em;
+        flex: 1;
+        max-height: none;
+        min-height: 0;
     }
     .fun-choices button {
         font-size: 1.2em;
         padding: 14px 18px;
     }
+    .story-main {
+        flex-direction: row;
+        gap: 20px;
+        min-height: 0;
+        overflow: hidden;
+    }
     .story-left {
-        flex: 0 0 35%;
+        flex: 0 0 44%;
+        min-height: 0;
+    }
+    .init-form,
+    .genre-section {
+        overflow: hidden;
+    }
+    .story-image-frame {
+        flex: 1;
+        min-height: 460px;
+    }
+}
+
+@media (min-width: 700px) {
+    .screen {
+        padding: 18px 22px;
+    }
+    .genre-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .fun-story-log {
+        max-height: min(42vh, 420px);
+    }
+}
+
+@media (min-width: 900px) {
+    .screen {
+        padding: 20px 24px;
+    }
+    .story-main {
+        flex-direction: row;
+        align-items: stretch;
+    }
+    .story-left {
+        flex: 0 0 42%;
+    }
+    .fun-story-log {
+        flex: 1;
+        max-height: none;
+        min-height: 0;
     }
 }
 
 @media (max-width: 600px) {
-    .genre-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    body.kids-mode {
-        font-size: 18px;
-    }
     .form-row {
         flex-direction: column;
         gap: 8px;
@@ -448,13 +517,23 @@ body.kids-mode {
     .form-col-small {
         flex: 1;
     }
+    .fun-title {
+        font-size: 1.85em;
+    }
+    .subtitle {
+        font-size: 1rem;
+    }
+    .fun-story-log {
+        max-height: none;
+        min-height: 0;
+    }
 }
 
 .story-image-frame {
     position: relative;
     width: 100%;
-    flex: 1;
-    min-height: 160px;
+    flex: 0 0 auto;
+    min-height: 260px;
     border-radius: 16px;
     border: 4px solid #ffcc66;
     background: #fff8e1;
@@ -504,45 +583,24 @@ body.kids-mode {
     to { opacity: 1; }
 }
 
-.character-panel {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-}
-
-.character-chip {
-    background: #fff8e1;
-    border: 2px solid #ffcc66;
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 0.75em;
-    color: #555;
-}
-
-
 /* ═══ MOBILE: stack vertically ═══ */
 @media (max-width: 700px) {
-    .story-main {
-        flex-direction: column;
-        gap: 8px;
-    }
-    .story-left {
-        flex: 0 0 auto;
-        flex-direction: row;
-        gap: 8px;
-    }
     .story-image-frame {
-        flex: 0 0 120px;
-        width: 120px;
-        min-height: 120px;
-        max-height: 120px;
+        width: 100%;
+        min-height: 220px;
+        max-height: 320px;
     }
     .story-image {
-        object-fit: cover;
+        object-fit: contain;
     }
-    .character-panel {
-        flex-direction: column;
-        flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .genre-btn,
+    .fun-btn,
+    .fun-choices button,
+    .story-image-frame.image-loaded .story-image {
+        transition: none;
+        animation: none;
     }
 }

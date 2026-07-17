@@ -20,6 +20,7 @@ import (
 type Engine struct {
 	repo          repository.Repository
 	llmClient     *llm.Client
+	kidsLLMClient *llm.Client
 	twistEngine   *TwistEngine
 	safety        *SafetyFilter
 	nameGenerator *NameGenerator
@@ -28,11 +29,12 @@ type Engine struct {
 	sessionMu     map[string]*sync.Mutex
 }
 
-func NewEngine(repo repository.Repository, llmClient *llm.Client, cfg *config.Config) *Engine {
+func NewEngine(repo repository.Repository, llmClient *llm.Client, kidsLLMClient *llm.Client, cfg *config.Config) *Engine {
 	safety := NewSafetyFilter()
 	return &Engine{
 		repo:          repo,
 		llmClient:     llmClient,
+		kidsLLMClient: kidsLLMClient,
 		twistEngine:   NewTwistEngine(60),
 		safety:        safety,
 		nameGenerator: NewNameGenerator(50, safety),
@@ -52,6 +54,13 @@ func (e *Engine) getSessionLock(id string) *sync.Mutex {
 
 func (e *Engine) GetSession(ctx context.Context, id string) (*domain.Session, error) {
 	return e.repo.GetSession(ctx, id)
+}
+
+func (e *Engine) textClientForGenre(genre string) *llm.Client {
+	if domain.IsKidsGenre(genre) && e.kidsLLMClient != nil {
+		return e.kidsLLMClient
+	}
+	return e.llmClient
 }
 
 func (e *Engine) GenerateStoryText(ctx context.Context, sessionID string) (string, error) {
@@ -100,7 +109,7 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 	// Validate and sanitize user-supplied name to prevent prompt injection.
 	userName := sanitize(req.Name)
 	if !IsValidNameRequest(userName) {
-		userName = FallbackName()
+		userName = FallbackName(req.Genre)
 	}
 
 	// Archetype is optional for kids genres; default to Hero.
@@ -171,8 +180,10 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 	}
 
 	languageInstruction := ""
+	pageInstruction := ""
 	if domain.IsKidsGenre(req.Genre) {
-		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. This is Turn 1 (Pengenalan/Introduction): introduce the protagonist, set the scene, and establish what they want. The story will run for exactly 5 turns total (Introduction → Development → Development → Climax → Resolution). Keep this opening concise — do NOT resolve the story here. Create a consistent main character profile and 1-2 supporting side character profiles using state_update.add_entities. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood). Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
+		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. Create a consistent main character profile and 1-2 supporting side character profiles using state_update.add_entities. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also set state_update.visual_setting to a concise ENGLISH reusable storybook background profile for this story world, covering the place, lighting, important props, and atmosphere. Keep that visual setting stable across later pages unless the story truly moves to a new place. Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood). Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
+		pageInstruction = KidsPageInstruction(1, session.Age)
 	}
 
 	userMsg := fmt.Sprintf(`Begin a new serialized light novel.
@@ -181,6 +192,7 @@ Archetype: %s (%s).
 Genre: %s (%s).
 Story seed: %s.
 Opening style: %s
+%s
 %s
 %s
 
@@ -193,28 +205,28 @@ Current State: %s`,
 		BuildOpening(openingScene),
 		nameHint,
 		languageInstruction,
+		pageInstruction,
 		stateJSON(session.State),
 	)
 
-	modelToUse := ""
-	if domain.IsKidsGenre(session.Genre) && e.cfg.KidsLLMModel != "" {
-		modelToUse = e.cfg.KidsLLMModel
-		slog.Info("kids_model_selected", "session_id", session.ID, "model", modelToUse)
+	textClient := e.textClientForGenre(session.Genre)
+	if domain.IsKidsGenre(session.Genre) && textClient == e.kidsLLMClient {
+		slog.Info("kids_model_selected", "session_id", session.ID, "model", textClient.Model, "provider_base", textClient.BaseURL)
 	}
 
-	llmResult, err := e.llmClient.GenerateTurnWithModel(ctx, []llm.Message{
+	llmResult, err := textClient.GenerateTurnWithModel(ctx, []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userMsg},
-	}, modelToUse)
+	}, "")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("LLM error on start: %w", err)
 	}
 
 	llmResult.Response.StoryText = e.safety.Sanitize(llmResult.Response.StoryText)
 
-	// Post-generation Bahasa Malaysia enforcement for kids stories via LLM self-review.
 	if domain.IsKidsGenre(session.Genre) {
-		llmResult.Response.StoryText, llmResult.Response.Choices = e.reviewBahasaMalaysia(ctx, llmResult.Response.StoryText, llmResult.Response.Choices, modelToUse)
+		// Post-generation Bahasa Malaysia enforcement for kids stories via LLM self-review.
+		llmResult.Response.StoryText, llmResult.Response.Choices = e.reviewBahasaMalaysia(ctx, textClient, llmResult.Response.StoryText, llmResult.Response.Choices)
 		if e.cfg.FeatureEnabled("kids_storybook_v2") {
 			llmResult.Response.StoryText = EnforceKidsWordLimit(llmResult.Response.StoryText, session.Age)
 		}
@@ -254,7 +266,7 @@ Current State: %s`,
 		return nil, nil, nil, fmt.Errorf("failed to save story log: %w", err)
 	}
 
-	e.logMetrics(session.Genre, llmResult.Response.StoryText, session.State.Entities, 1, generated, session.Age, session.Status, modelToUse)
+	e.logMetrics(session.Genre, llmResult.Response.StoryText, session.State.Entities, 1, generated, session.Age, session.Status, textClient.Model)
 
 	return session, log, llmResult.Response.Choices, nil
 }
@@ -321,19 +333,7 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 
 	chapterInstruction := ""
 	if domain.IsKidsGenre(session.Genre) {
-		// Kids stories run 5 turns: Intro → Development → Development → Climax → Resolution.
-		switch turnNumber {
-		case 1:
-			chapterInstruction = "ARAHAN BABAK 1 (Pengenalan): Perkenalkan watak utama, latar, dan masalah atau cita-cita mereka. Mulakan dengan ceria dan menarik."
-		case 2:
-			chapterInstruction = "ARAHAN BABAK 2 (Perkembangan): Majukan plot. Watak utama mula menghadapi cabaran atau bertemu kawan baru. Tingkatkan minat."
-		case 3:
-			chapterInstruction = "ARAHAN BABAK 3 (Perkembangan): Cabaran menjadi lebih sukar. Watak utama belajar sesuatu baru atau bertemu rintangan yang lebih besar."
-		case 4:
-			chapterInstruction = "ARAHAN BABAK 4 (Klimaks): Ini adalah puncak cerita! Watak utama menghadapi cabaran terbesar dan membuat keputusan penting. Buatkan cerita sangat menarik dan tegang (tetapi masih selamat untuk kanak-kanak)."
-		case 5:
-			chapterInstruction = "ARAHAN BABAK 5 (Penyelesaian - TAMAT): Ini adalah babak terakhir! Tamatkan cerita dengan penyelesaian yang gembira, memuaskan, dan memberikan pengajaran yang baik. Selesaikan semua masalah. Jangan biarkan cerita tergantung. Jangan tanya soalan di akhir teks. Berikan penutup yang lengkap dan gembira dalam Bahasa Malaysia."
-		}
+		chapterInstruction = KidsPageInstruction(turnNumber, session.Age)
 	} else if turnNumber%6 == 0 {
 		chapterInstruction = "This scene ENDS the current chapter. Wrap up the chapter with a strong cliffhanger. Do NOT add any chapter title text in the story_text. The system will add the chapter heading."
 	}
@@ -349,7 +349,7 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 
 	languageInstruction := ""
 	if domain.IsKidsGenre(session.Genre) {
-		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood)."
+		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Reuse the Known Visual Setting exactly when the story is still in the same place. Only change state_update.visual_setting when the story genuinely moves to a new location, and then describe the new stable setting in concise ENGLISH. Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood)."
 	} else {
 		languageInstruction = "Use simple, clear English with short sentences."
 	}
@@ -359,6 +359,7 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 Current State: %s
 Active Flags: %s
 Known Characters: %s
+Known Visual Setting: %s
 
 Continue the story from this choice. %s Advance the plot, reveal character, escalate tension appropriately for the selected genre and age. %s
 %s
@@ -371,6 +372,7 @@ Do NOT contradict the known characters or their relationships listed above.`,
 		stateJSON(session.State),
 		strings.Join(session.State.Flags, ", "),
 		entitySummary,
+		e.visualSettingSummary(session.State.VisualSetting),
 		languageInstruction,
 		spontaneousTwist,
 		chapterInstruction,
@@ -378,22 +380,28 @@ Do NOT contradict the known characters or their relationships listed above.`,
 	)
 	messages = append(messages, llm.Message{Role: "user", Content: userMsg})
 
-	modelToUse := ""
-	if domain.IsKidsGenre(session.Genre) && e.cfg.KidsLLMModel != "" {
-		modelToUse = e.cfg.KidsLLMModel
-		slog.Info("kids_model_selected", "session_id", session.ID, "model", modelToUse)
+	textClient := e.textClientForGenre(session.Genre)
+	if domain.IsKidsGenre(session.Genre) && textClient == e.kidsLLMClient {
+		slog.Info("kids_model_selected", "session_id", session.ID, "model", textClient.Model, "provider_base", textClient.BaseURL)
 	}
 
-	llmResult, err := e.llmClient.GenerateTurnWithModel(ctx, messages, modelToUse)
+	llmResult, err := textClient.GenerateTurnWithModel(ctx, messages, "")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("LLM error on turn: %w", err)
 	}
 
 	llmResult.Response.StoryText = e.safety.Sanitize(llmResult.Response.StoryText)
 
-	// Post-generation Bahasa Malaysia enforcement for kids stories via LLM self-review.
 	if domain.IsKidsGenre(session.Genre) {
-		llmResult.Response.StoryText, llmResult.Response.Choices = e.reviewBahasaMalaysia(ctx, llmResult.Response.StoryText, llmResult.Response.Choices, modelToUse)
+		if turnNumber >= KidsStoryMinPages && llmResult.Response.StoryComplete {
+			llmResult.Response.StoryText = e.polishKidsEnding(ctx, textClient, llmResult.Response.StoryText, session.Age, turnNumber)
+		} else if turnNumber >= KidsStoryPageCount {
+			llmResult.Response.StoryText = e.polishKidsEnding(ctx, textClient, llmResult.Response.StoryText, session.Age, turnNumber)
+			llmResult.Response.StoryComplete = true
+		}
+
+		// Post-generation Bahasa Malaysia enforcement for kids stories via LLM self-review.
+		llmResult.Response.StoryText, llmResult.Response.Choices = e.reviewBahasaMalaysia(ctx, textClient, llmResult.Response.StoryText, llmResult.Response.Choices)
 		if e.cfg.FeatureEnabled("kids_storybook_v2") {
 			llmResult.Response.StoryText = EnforceKidsWordLimit(llmResult.Response.StoryText, session.Age)
 		}
@@ -420,7 +428,9 @@ Do NOT contradict the known characters or their relationships listed above.`,
 	if session.State.Health <= 0 {
 		session.State.Health = 0
 		session.Status = "game_over"
-	} else if domain.IsKidsGenre(session.Genre) && turnNumber >= 5 {
+	} else if domain.IsKidsGenre(session.Genre) && turnNumber >= KidsStoryMinPages && llmResult.Response.StoryComplete {
+		session.Status = "game_over"
+	} else if domain.IsKidsGenre(session.Genre) && turnNumber >= KidsStoryPageCount {
 		session.Status = "game_over"
 	}
 
@@ -449,7 +459,7 @@ Do NOT contradict the known characters or their relationships listed above.`,
 		return nil, nil, nil, fmt.Errorf("failed to save story log: %w", err)
 	}
 
-	e.logMetrics(session.Genre, llmResult.Response.StoryText, session.State.Entities, turnNumber, GeneratedName{}, session.Age, session.Status, modelToUse)
+	e.logMetrics(session.Genre, llmResult.Response.StoryText, session.State.Entities, turnNumber, GeneratedName{}, session.Age, session.Status, textClient.Model)
 
 	return session, log, llmResult.Response.Choices, nil
 }
@@ -493,6 +503,9 @@ func (e *Engine) applyStateDelta(state *domain.GameState, delta llm.StateDelta) 
 	}
 
 	state.Flags = mergeFlags(state.Flags, delta.AddFlags, delta.RemoveFlags)
+	if delta.VisualSetting != "" {
+		state.VisualSetting = delta.VisualSetting
+	}
 }
 
 func (e *Engine) updateEntities(state *domain.GameState, delta llm.StateDelta) {
@@ -562,6 +575,14 @@ func (e *Engine) entitySummary(entities map[string]domain.Entity) string {
 	return strings.Join(parts, "; ")
 }
 
+func (e *Engine) visualSettingSummary(setting string) string {
+	setting = strings.TrimSpace(setting)
+	if setting == "" {
+		return "None yet."
+	}
+	return setting
+}
+
 func (e *Engine) chapterTitleForTurn(turnNumber, chapterNumber int) string {
 	if turnNumber%6 == 1 {
 		return fmt.Sprintf("Chapter %d", chapterNumber)
@@ -577,9 +598,10 @@ You must respond ONLY in valid JSON matching the requested schema exactly.
 Schema fields:
 "story_text": string
 "choices": array of exactly 4 strings
-"state_update": object with health_delta, inventory_add, inventory_remove, stats_delta, bonds_delta, karma_delta, fate_points_delta, reputation_delta, add_flags, remove_flags, add_entities (array), update_entities (array or empty object if no updates)
+"state_update": object with health_delta, inventory_add, inventory_remove, stats_delta, bonds_delta, karma_delta, fate_points_delta, reputation_delta, add_flags, remove_flags, visual_setting (string for a reusable visual world/background profile in ENGLISH for kids stories), add_entities (array), update_entities (array or empty object if no updates)
 "format_hints": object with chapter_title (string), scene_break (boolean), monologue (boolean or count), dialogue_lines (boolean or count)
 "twist_added": boolean
+"story_complete": boolean
 "image_scene": string — for kids stories, a concise ENGLISH visual description of the current scene for image generation. Describe characters present, their poses/expressions, setting, and mood. Example: "A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood."`
 
 	style := FormatAsLightNovel(genre)
@@ -605,7 +627,8 @@ ENTITY CONSISTENCY:
 - Keep pronouns and gender consistent for every named character.
 - When a new named character appears, add them to add_entities with name, relation_to_pc, gender, role, status, appearance, and traits.
 - For kids stories, treat Entities as character profiles. Keep name, appearance, personality traits, role, and relationship reusable and consistent across every turn.
-- Kids appearance must be concrete and visual: hair length/style, shirt/top color, trousers/skirt, shoes, and distinctive accessory where useful.`, genre, genre)
+- Kids appearance must be concrete and visual: hair length/style, shirt/top color, trousers/skirt, shoes, and distinctive accessory where useful.
+- For kids stories, keep the storybook background and world details visually consistent across pages. If the location changes, update state_update.visual_setting to the new stable place description.`, genre, genre)
 	} else {
 		enforceRules = "Follow the genre and keep characters consistent when possible."
 	}
@@ -638,7 +661,7 @@ Remember: the world must react to the protagonist. End every turn on a hook.`, b
 }
 
 func (e *Engine) arcInstruction(turnNumber int) string {
-	// Kids stories use a 5-turn arc handled by chapterInstruction.
+	// Kids stories use their own 10-page arc handled by KidsPageInstruction.
 	// This method is for non-kids stories only.
 	phase := turnNumber / 6
 	switch {
@@ -762,7 +785,7 @@ func sanitize(s string) string {
 //
 // If the LLM call fails, it returns the original text unchanged (fail-open)
 // so a transient API error doesn't block the story.
-func (e *Engine) reviewBahasaMalaysia(ctx context.Context, storyText string, choices []string, modelOverride string) (string, []string) {
+func (e *Engine) reviewBahasaMalaysia(ctx context.Context, client *llm.Client, storyText string, choices []string) (string, []string) {
 	reviewPrompt := `Anda adalah penyunting bahasa yang teliti. Tugas anda ialah menyemak teks cerita kanak-kanak dan memastikan ia ditulis sepenuhnya dalam Bahasa Malaysia standard (Malaysia), BUKAN Bahasa Indonesia.
 
 Peraturan ketat:
@@ -791,7 +814,7 @@ Pulangkan HANYA teks yang telah dibetulkan. Jangan penjelasan, jangan ulasan, ja
 		{Role: "user", Content: sb.String()},
 	}
 
-	corrected, err := e.llmClient.GenerateText(ctx, messages, modelOverride)
+	corrected, err := client.GenerateText(ctx, messages, "")
 	if err != nil {
 		slog.Warn("bahasa_malaysia_review_failed", "error", err)
 		return storyText, choices
@@ -833,6 +856,39 @@ Pulangkan HANYA teks yang telah dibetulkan. Jangan penjelasan, jangan ulasan, ja
 
 	slog.Info("bahasa_malaysia_review_done", "story_changed", cleanedStory != storyText, "choices_changed", !equalSlices(correctedChoices, choices))
 	return cleanedStory, correctedChoices
+}
+
+func (e *Engine) polishKidsEnding(ctx context.Context, client *llm.Client, storyText string, age, turnNumber int) string {
+	minWords, maxWords := kidsWordBounds(age)
+	targetWords := kidsTargetWords(age, turnNumber)
+	prompt := fmt.Sprintf(`Anda ialah editor penutup cerita kanak-kanak.
+
+Tugas anda:
+1. Tulis SEMULA petikan ini menjadi penutup cerita yang lengkap, hangat, dan memuaskan.
+2. Masalah utama mesti benar-benar selesai DALAM petikan ini.
+3. Jangan tamat dengan hanya petunjuk, sedar sesuatu, rancangan masa depan, atau "mereka akan..." tanpa hasil sebenar.
+4. Tunjukkan penyelesaian berlaku sekarang, kemudian beri pendaratan yang tenang dan satu pengajaran lembut.
+5. Kekalkan Bahasa Malaysia standard, mesra kanak-kanak, dan sesuai umur.
+6. Kekalkan watak, suasana, dan idea utama yang sudah ada. Jangan buka konflik baru.
+7. Panjang sasaran %d patah perkataan, antara %d hingga %d patah perkataan.
+8. Pulangkan HANYA teks cerita akhir. Jangan beri penjelasan.`, targetWords, minWords, maxWords)
+
+	messages := []llm.Message{
+		{Role: "system", Content: prompt},
+		{Role: "user", Content: storyText},
+	}
+
+	rewritten, err := client.GenerateText(ctx, messages, "")
+	if err != nil {
+		slog.Warn("kids_ending_polish_failed", "turn", turnNumber, "error", err)
+		return storyText
+	}
+	rewritten = strings.TrimSpace(rewritten)
+	if rewritten == "" {
+		return storyText
+	}
+	slog.Info("kids_ending_polished", "turn", turnNumber, "changed", rewritten != storyText)
+	return rewritten
 }
 
 func equalSlices(a, b []string) bool {

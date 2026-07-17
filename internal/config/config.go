@@ -11,20 +11,24 @@ import (
 )
 
 type Config struct {
-	Port             string
-	DBPath           string
-	OpenAIBase       string
-	OpenAIKey        string
-	OpenAIModel      string
-	OpenAIImageModel string
-	KidsLLMModel     string
+	Port            string
+	DBPath          string
+	OpenAIBase      string
+	OpenAIKey       string
+	OpenAIModel     string
+	KidsLLMBase     string
+	KidsLLMKey      string
+	KidsLLMModel    string
+	ImageRouterBase string
+	ImageRouterKey  string
+	ImageRouterModel string
 	LLMTimeoutSec    int
 	LLMMaxRetries    int
 	LLMTemperature   float64
 	LLMTopP          float64
-	RequestMaxBytes  int64
-	FeatureFlags     map[string]bool
-	FeatureRollout   map[string]int // percentage 0-100 for gradual rollouts
+	RequestMaxBytes int64
+	FeatureFlags    map[string]bool
+	FeatureRollout  map[string]int // percentage 0-100 for gradual rollouts
 }
 
 func Load() (*Config, error) {
@@ -41,8 +45,12 @@ func Load() (*Config, error) {
 		OpenAIBase:       getEnv("OPENAI_API_BASE", "https://api.openai.com/v1"),
 		OpenAIKey:        getEnv("OPENAI_API_KEY", ""),
 		OpenAIModel:      getEnv("OPENAI_MODEL", "gpt-4o"),
-		OpenAIImageModel: getEnv("OPENAI_IMAGE_MODEL", "gpt-image-1"),
+		KidsLLMBase:      getEnv("KIDS_LLM_API_BASE", ""),
+		KidsLLMKey:       getEnv("KIDS_LLM_API_KEY", ""),
 		KidsLLMModel:     kidsModel,
+		ImageRouterBase:  getEnv("IMAGEROUTER_API_BASE", "https://api.imagerouter.io/v1/openai"),
+		ImageRouterKey:   getEnv("IMAGEROUTER_API_KEY", ""),
+		ImageRouterModel: getEnv("IMAGEROUTER_MODEL", "imagerouter/auto-image"),
 		LLMTimeoutSec:    getEnvInt("LLM_TIMEOUT_SEC", 60),
 		LLMMaxRetries:    getEnvInt("LLM_MAX_RETRIES", 2),
 		LLMTemperature:   getEnvFloat("LLM_TEMPERATURE", 0.85),
@@ -53,6 +61,18 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) HasKidsLLMProvider() bool {
+	return strings.TrimSpace(c.KidsLLMBase) != "" &&
+		strings.TrimSpace(c.KidsLLMKey) != "" &&
+		strings.TrimSpace(c.KidsLLMModel) != ""
+}
+
+func (c *Config) HasImageRouterProvider() bool {
+	return strings.TrimSpace(c.ImageRouterBase) != "" &&
+		strings.TrimSpace(c.ImageRouterKey) != "" &&
+		strings.TrimSpace(c.ImageRouterModel) != ""
 }
 
 func (c *Config) FeatureEnabled(name string) bool {

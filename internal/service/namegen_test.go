@@ -1,8 +1,10 @@
 package service
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestNameGenerator_UniqueWithinHistory(t *testing.T) {
@@ -20,17 +22,30 @@ func TestNameGenerator_UniqueWithinHistory(t *testing.T) {
 	}
 }
 
-func TestNameGenerator_GenreStyle(t *testing.T) {
-	ng := NewNameGenerator(50, NewSafetyFilter())
-
-	cyber := ng.Generate("Cyberpunk").Name
-	if !looksCyberpunk(cyber) {
-		t.Logf("cyberpunk name %q may not look genre-appropriate", cyber)
+func TestNameGenerator_KidsGenresUseDedicatedProfile(t *testing.T) {
+	kids := profileForGenre("Pengembaraan")
+	adult := profileForGenre("Adventure")
+	if reflect.DeepEqual(kids, adult) {
+		t.Fatal("expected kids genres to use a dedicated procedural profile")
 	}
+}
 
-	steampunk := ng.Generate("Steampunk").Name
-	if !looksSteampunk(steampunk) {
-		t.Logf("steampunk name %q may not look genre-appropriate", steampunk)
+func TestNameGenerator_ProceduralNamesStayFormatted(t *testing.T) {
+	ng := NewNameGenerator(50, NewSafetyFilter())
+	for _, genre := range []string{"Adventure", "Pengembaraan", "Cyberpunk", "Xianxia"} {
+		name := ng.Generate(genre).Name
+		if name == "" {
+			t.Fatalf("expected non-empty name for genre %q", genre)
+		}
+		for _, part := range strings.Fields(name) {
+			runes := []rune(part)
+			if len(runes) == 0 {
+				continue
+			}
+			if !unicode.IsUpper(runes[0]) {
+				t.Fatalf("expected %q to be title-cased", name)
+			}
+		}
 	}
 }
 
@@ -61,8 +76,9 @@ func TestNameGenerator_UniqueRate(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ng.Generate("Adventure")
 	}
-	rate := ng.UniqueRate([]string{"Elias", "Rowan", "Kira"})
-	if rate < 0.7 {
+	history := ng.History()
+	rate := ng.UniqueRate(history[:2])
+	if rate <= 0.5 {
 		t.Fatalf("expected high unique rate, got %.2f", rate)
 	}
 }
@@ -80,29 +96,17 @@ func TestIsValidNameRequest(t *testing.T) {
 			t.Errorf("expected name %q to be invalid", b)
 		}
 	}
-	if !IsValidNameRequest("Ayla") {
+	if !IsValidNameRequest("ValidTestName") {
 		t.Error("expected valid name to be accepted")
 	}
 }
 
-func looksCyberpunk(name string) bool {
-	keywords := []string{"Kael", "Rin", "Jax", "Nova", "Zero", "Vex", "Sera", "Nix", "Blaze", "Echo", "Kovacs", "Tanaka", "Wired", "Neon", "Ghost", "Chrome", "Glitch", "Rogue"}
-	lower := strings.ToLower(name)
-	for _, k := range keywords {
-		if strings.Contains(lower, strings.ToLower(k)) {
-			return true
-		}
+func TestFallbackNameUsesProceduralGeneration(t *testing.T) {
+	name := FallbackName("Fantasi")
+	if name == "" {
+		t.Fatal("expected fallback name to be generated")
 	}
-	return false
-}
-
-func looksSteampunk(name string) bool {
-	keywords := []string{"Thaddeus", "Emmeline", "Barnaby", "Gwendolyn", "Cogsworth", "Brasswell", "Gearhart", "Copperfield", "Steamwright", "Clockwork"}
-	lower := strings.ToLower(name)
-	for _, k := range keywords {
-		if strings.Contains(lower, strings.ToLower(k)) {
-			return true
-		}
+	if strings.EqualFold(name, "traveler") {
+		t.Fatal("fallback name should no longer use a fixed label")
 	}
-	return false
 }

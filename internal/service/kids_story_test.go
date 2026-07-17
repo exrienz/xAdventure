@@ -13,8 +13,10 @@ func TestKidsStyleRulesIncludesStrictBahasaMalaysiaAndAgeBounds(t *testing.T) {
 	for _, want := range []string{
 		"standard Bahasa Malaysia only",
 		"Indonesian",
-		"20 words",
-		"age 4-5",
+		"at least 6 pages and at most 10 pages",
+		"15-30 words",
+		"Age 4",
+		"Aim for about",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -58,7 +60,7 @@ func contains(values []string, want string) bool {
 }
 
 func TestKidsWordCapsMatchRequirement(t *testing.T) {
-	tests := map[int]int{4: 20, 5: 20, 6: 40, 7: 40, 8: 80}
+	tests := map[int]int{4: 30, 5: 50, 6: 80, 7: 120, 8: 180}
 	for age, want := range tests {
 		if got := KidsMaxWords(age); got != want {
 			t.Fatalf("KidsMaxWords(%d) = %d; want %d", age, got, want)
@@ -71,11 +73,11 @@ func TestKidsStyleRulesIncludesAgeVocabularyGuidance(t *testing.T) {
 		age  int
 		want string
 	}{
-		{4, "20 words"},
-		{5, "very simple vocabulary"},
-		{6, "40 words"},
-		{7, "simple sentences"},
-		{8, "80 words"},
+		{4, "15-30 words"},
+		{5, "simple familiar vocabulary"},
+		{6, "40-80 words"},
+		{7, "70-120 words"},
+		{8, "100-180 words"},
 	}
 	for _, tt := range tests {
 		prompt := KidsStyleRules("Pengembaraan", tt.age, true)
@@ -86,18 +88,64 @@ func TestKidsStyleRulesIncludesAgeVocabularyGuidance(t *testing.T) {
 }
 
 func TestEnforceKidsWordLimitTruncates(t *testing.T) {
-	words := make([]string, 90)
+	words := make([]string, 190)
 	for i := range words {
 		words[i] = "kata"
 	}
 	got := EnforceKidsWordLimit(strings.Join(words, " "), 6)
-	if CountWords(got) != 40 {
-		t.Fatalf("truncated word count = %d; want 40", CountWords(got))
+	if CountWords(got) > 80 {
+		t.Fatalf("truncated word count = %d; want <= 80", CountWords(got))
+	}
+	if strings.HasSuffix(strings.TrimSpace(got), "kata") && !strings.HasSuffix(strings.TrimSpace(got), ".") {
+		t.Fatalf("expected sentence-safe ending, got %q", got)
 	}
 }
 
-func TestKidsImageURLUsesPollinationsAndSanitizesPrompt(t *testing.T) {
-	url := KidsImageURL(`<script>alert(1)</script> Ali jumpa kucing!`, nil, "Fantasi", 6)
+func TestEnforceKidsWordLimitRemovesIncompleteTrailingFragment(t *testing.T) {
+	text := "Nuha duduk di atas rumput yang lembut. Dia lihat awan putih di langit biru. Tiba-tiba, Nuha nampak kilauan berwarna pelangi di dalam hutan kecil. Nuha rasa ingin tahu sangat. Dia"
+	got := EnforceKidsWordLimit(text, 5)
+	if strings.HasSuffix(strings.TrimSpace(got), "Dia") {
+		t.Fatalf("expected incomplete fragment to be removed, got %q", got)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(got), ".") {
+		t.Fatalf("expected complete sentence ending, got %q", got)
+	}
+}
+
+func TestKidsPageInstructionBuildsNaturalOpeningAndEnding(t *testing.T) {
+	opening := KidsPageInstruction(1, 5)
+	for _, want := range []string{"PAGE 1 OF 10", "Start at the true beginning", "25-50 words"} {
+		if !strings.Contains(opening, want) {
+			t.Fatalf("opening instruction missing %q:\n%s", want, opening)
+		}
+	}
+
+	ending := KidsPageInstruction(10, 5)
+	for _, want := range []string{"PAGE 10 OF 10", "final page", "happy and satisfying ending", "Do NOT end with only a realization"} {
+		if !strings.Contains(ending, want) {
+			t.Fatalf("ending instruction missing %q:\n%s", want, ending)
+		}
+	}
+
+	earliestEnding := KidsPageInstruction(6, 5)
+	for _, want := range []string{"PAGE 6 OF 10", "may end naturally", "story_complete", "Do NOT save the ending for page 10"} {
+		if !strings.Contains(earliestEnding, want) {
+			t.Fatalf("page 6 instruction missing %q:\n%s", want, earliestEnding)
+		}
+	}
+}
+
+func TestKidsPageIndicator(t *testing.T) {
+	if got := KidsPageIndicator(1); got != "Halaman 1 / maks 10" {
+		t.Fatalf("KidsPageIndicator(1) = %q", got)
+	}
+	if got := KidsPageIndicator(99); got != "Halaman 10 / maks 10" {
+		t.Fatalf("KidsPageIndicator(99) = %q", got)
+	}
+}
+
+func TestKidsImageURLUsesLocalProxyAndSanitizesPrompt(t *testing.T) {
+	url := KidsImageURL(`<script>alert(1)</script> Watak jumpa kucing!`, "sunny village field with a mango tree", nil, "Fantasi", 6)
 	_ = url // still test sanitization
 	if !strings.HasPrefix(url, "/api/kids/image?prompt=") {
 		t.Fatalf("unexpected image url: %s", url)
@@ -109,23 +157,24 @@ func TestKidsImageURLUsesPollinationsAndSanitizesPrompt(t *testing.T) {
 
 func TestKidsImagePromptUsesCharacterAppearanceNotFullStoryDump(t *testing.T) {
 	imageScene := "A young girl with long dark hair, pink shirt, and blue skirt kneels beside a small orange kitten under a big tree. The kitten looks scared. Green grass, butterflies, cool breeze."
+	visualSetting := "sunny village field with a mango tree, wooden fence, soft morning light, and warm watercolor atmosphere"
 	entities := map[string]domain.Entity{
-		"naila": {
-			Name:       "Naila",
+		"watak-utama": {
+			Name:       "WatakUtama",
 			Role:       "protagonist",
 			Appearance: "young Malaysian girl with long dark hair, pink shirt, blue skirt, white shoes, yellow butterfly hair clip",
 			Traits:     []string{"kind", "curious"},
 		},
-		"kucing": {
-			Name:       "Mimi",
+		"watak-sampingan": {
+			Name:       "KawanKecil",
 			Role:       "side character kitten",
 			Appearance: "small orange kitten with white paws and a tiny blue ribbon",
 			Traits:     []string{"timid"},
 		},
 	}
 
-	prompt := BuildKidsImagePrompt(imageScene, entities, "Fantasi", 4)
-	for _, want := range []string{"long dark hair", "pink shirt", "blue skirt", "yellow butterfly hair clip", "small orange kitten", "Scene:"} {
+	prompt := BuildKidsImagePrompt(imageScene, visualSetting, entities, "Fantasi", 4)
+	for _, want := range []string{"long dark hair", "pink shirt", "blue skirt", "yellow butterfly hair clip", "small orange kitten", "Story setting:", "mango tree", "Current page scene:", "single full-page illustration", "No split panels"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing visual detail %q:\n%s", want, prompt)
 		}

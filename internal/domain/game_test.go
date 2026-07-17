@@ -31,9 +31,14 @@ func TestKidsAgeOrDefault(t *testing.T) {
 }
 
 func TestIsKidsGenre(t *testing.T) {
-	for _, genre := range []string{"Kids", "Pengembaraan", "Fantasi", "Fabel", "Cerita Haiwan", "Persahabatan"} {
+	for _, genre := range []string{"Pengembaraan", "Fantasi", "Cerita Haiwan", "Kisah Dongeng", "Kelakar", "Persahabatan", "Sains & Teknologi", "Mistik/Misteri"} {
 		if !IsKidsGenre(genre) {
 			t.Fatalf("expected %q to be a kids genre", genre)
+		}
+	}
+	for _, genre := range []string{"Kids", "Fabel", "Humor", "Misteri Kanak-kanak"} {
+		if IsKidsGenre(genre) {
+			t.Fatalf("expected legacy genre %q to no longer be a kids genre", genre)
 		}
 	}
 	if IsKidsGenre("Mystery") {

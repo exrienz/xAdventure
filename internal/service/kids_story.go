@@ -5,14 +5,22 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/muz/xadventure/internal/domain"
 )
 
+const (
+	KidsStoryMinPages  = 6
+	KidsStoryPageCount = 10
+)
+
 func KidsStyleRules(genre string, age int, dynamicKidsEnabled bool) string {
-	tier := domainKidsAgeTier(age)
+	minWords, maxWords := kidsWordBounds(age)
+	targetWords := kidsTargetWords(age, 1)
+	pagePlan := kidsArcOverview()
 	prompt := `Style Rules (Strict Bahasa Malaysia for Kids):
 - Write the ENTIRE story_text and choices in standard Bahasa Malaysia only.
 - Use standard Malaysian Malay vocabulary and spelling. Do NOT use Indonesian dialect, slang, or syntax.
@@ -46,36 +54,31 @@ func KidsStyleRules(genre string, age int, dynamicKidsEnabled bool) string {
 - Do NOT include horror, explicit violence, romance, adult themes, or scary imagery.
 - Keep sentences EXTREMELY short and simple. One clear idea per sentence.
 - NO large walls of text or complex paragraphs.
-- End every turn with a simple, age-appropriate hook or question.
-- STORY ARC: The story runs for exactly 5 turns. Turn 1 = Pengenalan (Introduction), Turn 2-3 = Perkembangan (Development), Turn 4 = Klimaks (Climax), Turn 5 = Penyelesaian (Resolution, story ends).
-- Each turn MUST advance the story meaningfully toward the natural conclusion. Do NOT stall or repeat.
-- On Turn 5, the story MUST end completely with a happy, satisfying conclusion and a clear moral lesson. Never leave the story unfinished.`
-
+- Every page must feel like the next natural step. Never start like the story is already halfway through a crisis.
+- Cover only ONE clear micro-beat per page so the story grows gradually and smoothly.
+- The story must last at least 6 pages and at most 10 pages.
+- End each non-final page with a simple, age-appropriate hook or question.
+- If the story reaches a full, satisfying ending on page 6, 7, 8, or 9, you may finish naturally there.
+- On the final story page, set story_complete to true in the JSON.
+- Use this page arc as guidance:
+` + pagePlan
 	if !dynamicKidsEnabled {
 		return prompt
 	}
 
-	minWords, maxWords := kidsWordBounds(age)
 	return fmt.Sprintf(`%s
 
-Dynamic Age-Based Length (%s):
-- HARD LIMIT: story_text MUST be %d-%d words. DO NOT EXCEED %d words.
-- For age 4-5: maximum 20 words, very simple vocabulary, tiny sentences, one clear action.
-- For age 6-7: maximum 40 words, simple sentences, familiar vocabulary, light cause-and-effect.
-- For age 8 or above: maximum 80 words, slightly richer vocabulary, still clear and child-safe.
-- Choices must also follow the same language, tone, and simplicity rules.`, prompt, tier, minWords, maxWords, maxWords)
+Dynamic Age-Based Page Length (Age %d):
+- HARD LIMIT: each page's story_text MUST be %d-%d words. DO NOT EXCEED %d words.
+- Aim for about %d words on each page unless a slightly shorter or longer page serves the story better.
+- %s
+- Use %s
+- Choices must also follow the same language, tone, and simplicity rules.`, prompt, normalizedKidsAge(age), minWords, maxWords, maxWords, targetWords, kidsWordGuidance(age), kidsSentenceGuidance(age))
 }
 
 func KidsDynamicAgeInstruction(age int) string {
-	tier := domainKidsAgeTier(age)
 	minWords, maxWords := kidsWordBounds(age)
-	guidance := "slightly richer vocabulary, but still clear and child-safe"
-	if age <= 5 {
-		guidance = "very simple vocabulary, tiny sentences, one clear action"
-	} else if age <= 7 {
-		guidance = "simple sentences, familiar vocabulary, light cause-and-effect"
-	}
-	return fmt.Sprintf("CRITICAL: You are generating for a %d year old child. Use the %s age tier: story_text MUST be %d-%d words and MUST NOT exceed %d words. Use %s. NO complex paragraphs.", age, tier, minWords, maxWords, maxWords, guidance)
+	return fmt.Sprintf("CRITICAL: You are generating one page for a %d year old child. Keep story_text between %d-%d words and NEVER exceed %d words. %s Use %s. Cover only one small story beat on this page.", normalizedKidsAge(age), minWords, maxWords, maxWords, kidsWordGuidance(age), kidsSentenceGuidance(age))
 }
 
 func CountWords(text string) int {
@@ -170,24 +173,142 @@ func IndonesianMarkers(text string) []string {
 // Indonesian detection is now handled by the LLM self-review pass
 // (Engine.reviewBahasaMalaysia). IndonesianMarkers is kept for logging.
 
-func domainKidsAgeTier(age int) string {
-	if age <= 5 {
-		return "4-5"
+func kidsWordBounds(age int) (int, int) {
+	switch normalizedKidsAge(age) {
+	case 3:
+		return 10, 20
+	case 4:
+		return 15, 30
+	case 5:
+		return 25, 50
+	case 6:
+		return 40, 80
+	case 7:
+		return 70, 120
+	default:
+		return 100, 180
 	}
-	if age <= 7 {
-		return "6-7"
-	}
-	return "8+"
 }
 
-func kidsWordBounds(age int) (int, int) {
-	if age <= 5 {
-		return 1, 20
+func normalizedKidsAge(age int) int {
+	if age < 3 {
+		return 3
 	}
-	if age <= 7 {
-		return 20, 40
+	if age > 8 {
+		return 8
 	}
-	return 40, 80
+	return age
+}
+
+func kidsWordGuidance(age int) string {
+	switch normalizedKidsAge(age) {
+	case 3:
+		return "Use very tiny vocabulary with one action and one clear feeling"
+	case 4:
+		return "Use very simple vocabulary with tiny actions and obvious cause-and-effect"
+	case 5:
+		return "Use simple familiar vocabulary with a gentle beginning, action, and tiny hook"
+	case 6:
+		return "Use simple sentences with light cause-and-effect and one meaningful change"
+	case 7:
+		return "Use clear school-age vocabulary with steady progression and one focused obstacle"
+	default:
+		return "Use richer but still child-safe vocabulary with smoother detail, motivation, and payoff"
+	}
+}
+
+func kidsSentenceGuidance(age int) string {
+	switch normalizedKidsAge(age) {
+	case 3:
+		return "2-3 ultra-short sentences"
+	case 4:
+		return "2-4 very short sentences"
+	case 5:
+		return "3-5 short sentences"
+	case 6:
+		return "4-6 short sentences"
+	case 7:
+		return "5-7 clear sentences"
+	default:
+		return "6-9 clear sentences"
+	}
+}
+
+func kidsArcOverview() string {
+	steps := []string{
+		"Page 1: gentle opening, protagonist, place, and small want",
+		"Page 2: a clue, invitation, or small problem appears",
+		"Page 3: the protagonist takes the first real step",
+		"Page 4: an early obstacle or surprise slows them down",
+		"Page 5: they learn, find, or realize something useful",
+		"Page 6: a setback or mistake creates a new problem; from here the story may end naturally once the main problem is fully solved",
+		"Page 7: the protagonist tries again with more courage or teamwork",
+		"Page 8: the biggest child-safe obstacle appears before the ending",
+		"Page 9: the solution begins and the main problem starts to unlock",
+		"Page 10: if the story is still active, this must be the complete happy ending, calm landing, and clear moral lesson",
+	}
+	return "- " + strings.Join(steps, "\n- ")
+}
+
+func KidsPageInstruction(turnNumber, age int) string {
+	minWords, maxWords := kidsWordBounds(age)
+	targetWords := kidsTargetWords(age, turnNumber)
+	common := fmt.Sprintf("PAGE %d OF %d. Keep story_text between %d-%d words and never exceed %d words. Aim for about %d words. Use %s. %s. Cover only one clear micro-beat on this page. Budget the page so the final 4-8 words can finish a complete closing sentence or hook. Never stop mid-sentence, mid-thought, or on a dangling fragment. Do NOT rush ahead to later pages.", turnNumber, KidsStoryPageCount, minWords, maxWords, maxWords, targetWords, kidsWordGuidance(age), kidsSentenceGuidance(age))
+	switch turnNumber {
+	case 1:
+		return common + " Start at the true beginning. Introduce the protagonist, the place, and one small want or activity. Do NOT begin in the middle of danger, chaos, or a half-finished adventure. End with a tiny clue or invitation."
+	case 2:
+		return common + " Show the first clue, invitation, or gentle problem. Let the protagonist notice it and care about it."
+	case 3:
+		return common + " Show the protagonist taking the first real step. Keep the action small and easy to follow."
+	case 4:
+		return common + " Add an early obstacle, misunderstanding, or playful surprise. The problem should grow naturally from the earlier pages."
+	case 5:
+		return common + " Give the protagonist a useful discovery, helper, tool, or lesson. This is the middle of the journey, not the ending."
+	case 6:
+		return common + " Show a meaningful obstacle, turning point, or breakthrough. If the story may end naturally here because one brave, kind, or clever action can fully solve the main problem, do it now, end warmly, and set story_complete to true. Do NOT save the ending for page 10 just because more pages are available. Otherwise use this page to prepare the final stretch."
+	case 7:
+		return common + " Let the protagonist try again with more bravery, kindness, or teamwork. If the main problem becomes fully solved in a satisfying way here, end the story now and set story_complete to true. Do NOT hold back a finished ending for later pages. Otherwise keep moving toward the ending."
+	case 8:
+		return common + " Present a strong child-safe obstacle or turning point before the ending. If the story naturally resolves here after that turning point, end fully, add a warm landing, and set story_complete to true. Do NOT stretch a solved story to page 10. Otherwise keep building toward the ending."
+	case 9:
+		return common + " Begin or complete the solution. If the main problem is fully resolved here, set story_complete to true and end warmly without leaving anything hanging. Do NOT end this page with only a clue, realization, or plan if the solution can already happen now."
+	case 10:
+		return common + " This is the final page. Fully solve the problem on this page, show the solution actually happening, give a happy and satisfying ending, add a calm landing, state a gentle moral lesson, and set story_complete to true. Do NOT end with only a realization, clue, or future plan. Do NOT ask a question at the end."
+	default:
+		return common + " Keep the story smooth, child-safe, and connected to the previous page."
+	}
+}
+
+func KidsPageIndicator(turnNumber int) string {
+	if turnNumber < 1 {
+		turnNumber = 1
+	}
+	if turnNumber > KidsStoryPageCount {
+		turnNumber = KidsStoryPageCount
+	}
+	return "Halaman " + strconv.Itoa(turnNumber) + " / maks " + strconv.Itoa(KidsStoryPageCount)
+}
+
+func kidsTargetWords(age, turnNumber int) int {
+	minWords, maxWords := kidsWordBounds(age)
+	if maxWords <= minWords {
+		return maxWords
+	}
+	rangeWords := maxWords - minWords
+	target := minWords + (rangeWords * 3 / 4)
+	if turnNumber <= 2 {
+		target = minWords + (rangeWords * 2 / 3)
+	} else if turnNumber >= 9 {
+		target = minWords + (rangeWords * 4 / 5)
+	}
+	if target > maxWords-2 {
+		target = maxWords - 2
+	}
+	if target < minWords {
+		target = minWords
+	}
+	return target
 }
 
 func stripHTMLTags(s string) string {
@@ -218,20 +339,102 @@ func KidsMaxWords(age int) int {
 }
 
 func EnforceKidsWordLimit(text string, age int) string {
+	text = strings.TrimSpace(text)
 	maxWords := KidsMaxWords(age)
 	if maxWords <= 0 {
 		return text
 	}
+	minWords, _ := kidsWordBounds(age)
 	words := strings.Fields(text)
-	if len(words) <= maxWords {
-		return text
+	if len(words) > maxWords {
+		text = trimToWordBudget(text, maxWords)
 	}
-	return strings.Join(words[:maxWords], " ")
+	text = trimIncompleteTail(text, minWords)
+	if !endsWithTerminalPunctuation(text) {
+		text = strings.TrimSpace(trimDanglingWords(text))
+		if text != "" && !endsWithTerminalPunctuation(text) {
+			text += "."
+		}
+	}
+	return strings.TrimSpace(text)
 }
 
-func BuildKidsImagePrompt(imageScene string, entities interface{}, genre string, age int) string {
+func trimToWordBudget(text string, maxWords int) string {
+	words := strings.Fields(text)
+	if len(words) <= maxWords {
+		return strings.TrimSpace(text)
+	}
+	truncated := strings.Join(words[:maxWords], " ")
+	if idx := lastSentenceBoundary(truncated); idx >= 0 {
+		candidate := strings.TrimSpace(truncated[:idx+1])
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return strings.TrimSpace(trimDanglingWords(truncated))
+}
+
+func trimIncompleteTail(text string, minWords int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || endsWithTerminalPunctuation(text) {
+		return text
+	}
+	if idx := lastSentenceBoundary(text); idx >= 0 {
+		candidate := strings.TrimSpace(text[:idx+1])
+		if CountWords(candidate) >= minWords {
+			return candidate
+		}
+	}
+	return text
+}
+
+func lastSentenceBoundary(text string) int {
+	last := -1
+	for i, r := range text {
+		switch r {
+		case '.', '!', '?':
+			last = i
+		}
+	}
+	return last
+}
+
+func endsWithTerminalPunctuation(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	runes := []rune(text)
+	last := runes[len(runes)-1]
+	return last == '.' || last == '!' || last == '?'
+}
+
+func trimDanglingWords(text string) string {
+	words := strings.Fields(strings.TrimSpace(text))
+	if len(words) == 0 {
+		return ""
+	}
+	dangling := map[string]bool{
+		"dan": true, "atau": true, "yang": true, "di": true, "ke": true, "dari": true,
+		"dengan": true, "untuk": true, "kerana": true, "supaya": true, "sambil": true,
+		"lalu": true, "semasa": true, "ketika": true, "bila": true, "agar": true,
+		"dia": true, "itu": true, "ini": true, "mereka": true, "kami": true, "kita": true,
+		"saya": true, "kamu": true, "nya": true,
+	}
+	for len(words) > 1 {
+		last := strings.ToLower(strings.Trim(words[len(words)-1], `"'.,!?`))
+		if !dangling[last] {
+			break
+		}
+		words = words[:len(words)-1]
+	}
+	return strings.Join(words, " ")
+}
+
+func BuildKidsImagePrompt(imageScene, visualSetting string, entities interface{}, genre string, age int) string {
 	genre = cleanPromptPart(genre, 40)
 	characters := kidsCharacterVisuals(entities)
+	setting := cleanPromptPart(visualSetting, 180)
 	scene := cleanPromptPart(imageScene, 200)
 	if scene == "" {
 		scene = "a bright child-safe storybook scene with the characters present"
@@ -239,7 +442,10 @@ func BuildKidsImagePrompt(imageScene string, entities interface{}, genre string,
 	if characters == "" {
 		characters = "consistent child protagonist with clear hair, clothing, shoes, and accessory details"
 	}
-	return fmt.Sprintf("Malaysian children's storybook illustration, age %d, warm cheerful watercolor style, no text, no scary imagery. Characters: %s. Scene: %s.", age, characters, scene)
+	if setting == "" {
+		setting = fmt.Sprintf("consistent %s storybook world with stable background details, child-safe atmosphere, and matching environment across pages", strings.ToLower(genre))
+	}
+	return fmt.Sprintf("Malaysian children's storybook illustration, age %d, warm cheerful watercolor style, no text, no scary imagery. Create exactly one single full-page illustration for one moment only. No split panels, no comic layout, no collage, no before-and-after frames, no duplicated characters in separate mini-scenes, and no multiple scenes inside one image. Keep the same character designs and story world setting as previous pages of this story. Characters: %s. Story setting: %s. Current page scene: %s.", age, characters, setting, scene)
 }
 
 func kidsCharacterVisuals(entities interface{}) string {
@@ -321,8 +527,8 @@ func cleanPromptPart(text string, maxLen int) string {
 	return clean
 }
 
-func KidsImageURL(imageScene string, entities interface{}, genre string, age int) string {
-	prompt := BuildKidsImagePrompt(imageScene, entities, genre, age)
+func KidsImageURL(imageScene, visualSetting string, entities interface{}, genre string, age int) string {
+	prompt := BuildKidsImagePrompt(imageScene, visualSetting, entities, genre, age)
 	return "/api/kids/image?prompt=" + url.QueryEscape(prompt)
 }
 

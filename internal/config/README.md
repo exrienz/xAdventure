@@ -6,11 +6,14 @@ This package manages the environment variable configuration for the application.
 
 The LLM Service supports conditional model selection based on the route context.
 
-*   `OPENAI_MODEL` (mapped to `LLM_MODEL` in documentation context): The default model used for all standard inference requests.
-*   `KIDS_LLM_MODEL`: An optional secondary model identifier used exclusively for requests originating from the `/kids` section (identified by the Kids genre).
+*   `OPENAI_API_BASE`, `OPENAI_API_KEY`, `OPENAI_MODEL`: The default openai-compatible provider used for all standard inference requests.
+*   `KIDS_LLM_API_BASE`, `KIDS_LLM_API_KEY`, `KIDS_LLM_MODEL`: An optional secondary openai-compatible provider used exclusively for requests originating from the `/kids` section (identified by the Kids genre).
+*   `IMAGEROUTER_API_BASE`, `IMAGEROUTER_API_KEY`, `IMAGEROUTER_MODEL`: A dedicated openai-compatible image provider used only by `/api/kids/image`.
 
 **Selection Rules:**
-1.  If a request is for the `/kids` section (Kids genre is selected) and `KIDS_LLM_MODEL` is defined and non-empty in the `.env` file, the LLM client will route the request to the `KIDS_LLM_MODEL`.
-2.  If `KIDS_LLM_MODEL` is not defined, or if the request is for any other section/genre, the system defaults to using `OPENAI_MODEL`.
+1.  All non-kids text requests use the default `OPENAI_*` provider.
+2.  Kids text requests use the dedicated kids provider only when `KIDS_LLM_API_BASE`, `KIDS_LLM_API_KEY`, and `KIDS_LLM_MODEL` are all defined and non-empty.
+3.  If the kids provider is incomplete, kids text requests fall back to the default `OPENAI_*` provider.
+4.  Kids image requests use the dedicated ImageRouter provider only when `IMAGEROUTER_API_BASE`, `IMAGEROUTER_API_KEY`, and `IMAGEROUTER_MODEL` are all defined and non-empty. Otherwise `/api/kids/image` returns `503`.
 
-This mechanism allows for cost optimization and tailored safety tuning for younger demographics while utilizing the same underlying API provider configuration (Base URL and API Key).
+This split allows default text, kids text, and kids image generation to use three separate provider lanes while keeping every integration openai-compatible.

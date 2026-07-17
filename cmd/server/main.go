@@ -30,6 +30,8 @@ func main() {
 		"addr", "0.0.0.0:"+cfg.Port,
 		"temperature", cfg.LLMTemperature,
 		"top_p", cfg.LLMTopP,
+		"image_router_base", cfg.ImageRouterBase,
+		"image_router_enabled", cfg.HasImageRouterProvider(),
 	)
 
 	db, err := sql.Open("sqlite", cfg.DBPath+"?_pragma=journal_mode(WAL)")
@@ -51,8 +53,14 @@ func main() {
 	}
 	defer repo.Close()
 
-	llmClient := llm.NewClient(cfg.OpenAIBase, cfg.OpenAIKey, cfg.OpenAIModel, cfg.LLMTimeoutSec, cfg.LLMMaxRetries, cfg.LLMTemperature, cfg.LLMTopP)
-	engine := service.NewEngine(repo, llmClient, cfg)
+	defaultLLMClient := llm.NewClient(cfg.OpenAIBase, cfg.OpenAIKey, cfg.OpenAIModel, cfg.LLMTimeoutSec, cfg.LLMMaxRetries, cfg.LLMTemperature, cfg.LLMTopP)
+
+	var kidsLLMClient *llm.Client
+	if cfg.HasKidsLLMProvider() {
+		kidsLLMClient = llm.NewClient(cfg.KidsLLMBase, cfg.KidsLLMKey, cfg.KidsLLMModel, cfg.LLMTimeoutSec, cfg.LLMMaxRetries, cfg.LLMTemperature, cfg.LLMTopP)
+	}
+
+	engine := service.NewEngine(repo, defaultLLMClient, kidsLLMClient, cfg)
 
 	router := transport.SetupRouter(engine, cfg)
 

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+
+	"github.com/muz/xadventure/internal/domain"
 )
 
 // NameGenerator produces genre-appropriate character names while avoiding
@@ -40,7 +43,7 @@ type GeneratedName struct {
 }
 
 // Generate returns a genre-appropriate name that is not in the recent history.
-// It will make several attempts before falling back to a decorated name.
+// It will make several attempts before falling back to a fresh neutral profile.
 func (ng *NameGenerator) Generate(genre string) GeneratedName {
 	ng.mu.Lock()
 	defer ng.mu.Unlock()
@@ -48,31 +51,47 @@ func (ng *NameGenerator) Generate(genre string) GeneratedName {
 	seed := time.Now().UnixNano() + int64(randInt(1<<20))
 	rng := newSeededRNG(seed)
 
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 12; attempt++ {
 		name := ng.pickForGenre(genre, rng)
-		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		name = strings.Title(strings.ToLower(name))
 		if ng.safety != nil && !ng.safety.IsSafeName(name) {
 			continue
 		}
-		if !ng.recentlyUsed(name) && !ng.usedInRun[name] {
+		if !ng.recentlyUsed(name) && !ng.usedInRun[strings.ToLower(name)] {
 			ng.record(name)
-			ng.usedInRun[name] = true
+			ng.usedInRun[strings.ToLower(name)] = true
 			return GeneratedName{Name: name, Seed: fmt.Sprintf("%d", seed+int64(attempt)), IsUnique: true}
 		}
 	}
 
-	// Fallback: decorate a base name with a short random suffix.
-	base := ng.pickForGenre(genre, rng)
-	name := fmt.Sprintf("%s %s", base, ng.randomSuffix(rng))
-	name = strings.TrimSpace(name)
-	name = strings.Title(strings.ToLower(name))
-	ng.record(name)
-	ng.usedInRun[name] = true
-	return GeneratedName{Name: name, Seed: fmt.Sprintf("%d", seed+100), IsUnique: false}
+	for attempt := 0; attempt < 6; attempt++ {
+		name := normalizeGeneratedName(buildProceduralName(neutralNameProfile(), rng))
+		if name == "" {
+			continue
+		}
+		if ng.safety != nil && !ng.safety.IsSafeName(name) {
+			continue
+		}
+		ng.record(name)
+		ng.usedInRun[strings.ToLower(name)] = true
+		return GeneratedName{Name: name, Seed: fmt.Sprintf("%d", seed+100+int64(attempt)), IsUnique: false}
+	}
+
+	// The generator always has fragments to build from, so reaching here should
+	// be extremely rare. Keep retrying procedurally rather than falling back to a fixed label.
+	for attempt := 0; attempt < 8; attempt++ {
+		name := normalizeGeneratedName(buildProceduralName(neutralNameProfile(), rng))
+		if name == "" {
+			continue
+		}
+		ng.record(name)
+		ng.usedInRun[strings.ToLower(name)] = true
+		return GeneratedName{Name: name, Seed: fmt.Sprintf("%d", seed+999+int64(attempt)), IsUnique: false}
+	}
+
+	return GeneratedName{Name: "", Seed: fmt.Sprintf("%d", seed+1999), IsUnique: false}
 }
 
 // Reset clears the per-request deduplication cache. Keep history intact.
@@ -114,27 +133,7 @@ func (ng *NameGenerator) History() []string {
 }
 
 func (ng *NameGenerator) pickForGenre(genre string, rng *seededRNG) string {
-	lists, ok := genreNameLists[strings.ToLower(genre)]
-	if !ok {
-		lists = genreNameLists["adventure"]
-	}
-	style := rng.pickString([]string{"first", "full", "epithet"})
-	switch style {
-	case "full":
-		first := rng.pickString(lists.first)
-		last := rng.pickString(lists.last)
-		return fmt.Sprintf("%s %s", first, last)
-	case "epithet":
-		first := rng.pickString(lists.first)
-		epithet := rng.pickString(lists.epithets)
-		return fmt.Sprintf("%s the %s", first, epithet)
-	default:
-		return rng.pickString(lists.first)
-	}
-}
-
-func (ng *NameGenerator) randomSuffix(rng *seededRNG) string {
-	return rng.pickString([]string{"Ash", "Thorn", "Veil", "Drift", "Rook", "Sparrow", "Quill", "Hollow", "Kind", "Shade"})
+	return normalizeGeneratedName(buildProceduralName(profileForGenre(genre), rng))
 }
 
 func (ng *NameGenerator) recentlyUsed(name string) bool {
@@ -154,76 +153,594 @@ func (ng *NameGenerator) record(name string) {
 	ng.history = append(ng.history, name)
 }
 
-type nameList struct {
-	first    []string
-	last     []string
-	epithets []string
+type segmentProfile struct {
+	onsets          []string
+	vowels          []string
+	codas           []string
+	prefixes        []string
+	suffixes        []string
+	minSyllables    int
+	maxSyllables    int
+	openVowelChance int
+	midCodaChance   int
+	prefixChance    int
+	suffixChance    int
 }
 
-// genreNameLists provides linguistically-flavored name pools for each genre.
-// These are small curated pools; they seed diversity through combinations and
-// the LLM is encouraged to invent additional names in the same style.
-var genreNameLists = map[string]nameList{
-	"adventure": {
-		first: []string{"Elias", "Rowan", "Kira", "Thane", "Mira", "Cedric", "Lena", "Dorian", "Sable", "Finn", "Aurelia", "Gareth", "Nerys", "Orion", "Isolde"},
-		last:  []string{"Stormwake", "Ironhart", "Brightshield", "Ashford", "Wilder", "Drakehollow", "Fairwind", "Stonevale", "Mosswood", "Thornwood"},
-		epithets: []string{"Brave", "Swift", "Steadfast", "Wandering", "Bold", "Keen", "Fierce", "True", "Wild", "Patient"},
-	},
-	"romance": {
-		first: []string{"Julian", "Sofia", "Theo", "Clara", "Leo", "Amara", "Henry", "Elise", "Luca", "Naomi", "Oliver", "Maya", "Daniel", "Iris", "Felix"},
-		last:  []string{"Hartwell", "Fairchild", "Ashbury", "Bellamy", "Lovecraft", "Dearborn", "Moreau", "Chen", "Rossi", "Whitmore"},
-		epithets: []string{"Hopeful", "Tender", "Loyal", "Dreaming", "Patient", "Passionate", "Gentle", "True", "Yearning", "Devoted"},
-	},
-	"cyberpunk": {
-		first: []string{"Kael", "Rin", "Jax", "Nova", "Zero", "Vex", "Sera", "Nix", "Blaze", "Echo", "Kira", "Rex", "Mako", "Lyra", "Cade"},
-		last:  []string{"Vance", "Kovacs", "Tanaka", "Sato", "Reyes", "Orlov", "Kim", "Zhao", "Patel", "Silva"},
-		epithets: []string{"Wired", "Neon", "Ghost", "Chrome", "Spliced", "Hollow", "Burned", "Glitch", "Rogue", "Sleek"},
-	},
-	"horror": {
-		first: []string{"Silas", "Edith", "Marcel", "Lenore", "Jonas", "Wren", "Victor", "Mabel", "Gideon", "Eleanor", "Caleb", "Ruth", "Otto", "Iris", "Hugo"},
-		last:  []string{"Blackwood", "Crane", "Vance", "Holloway", "Marsh", "Sinclair", "Darrow", "Graves", "Crowe", "Wakefield"},
-		epithets: []string{"Pale", "Hollow", "Bleak", "Cursed", "Dreadful", "Forsaken", "Silent", "Ghastly", "Mournful", "Unseen"},
-	},
-	"sci-fi": {
-		first: []string{"Cora", "Isaac", "Lyra", "Marcus", "Zoe", "Jaxon", "Astra", "Kiran", "Elara", "Nolan", "Freya", "Soren", "Tessa", "Orion", "Ira"},
-		last:  []string{"Vance", "Solano", "Nakamura", "Sterling", "Kessler", "Owusu", "Brynn", "Drake", "Yilmaz", "Carter"},
-		epithets: []string{"Stellar", "Voidborn", "Cosmic", "Keen", "Last", "Farwatch", "Bold", "Bright", "Patient", "Wandering"},
-	},
-	"mystery": {
-		first: []string{"Arthur", "Irene", "Harold", "Vivian", "Felix", "Mona", "Cedric", "Diana", "Owen", "Maude", "Percy", "Gwen", "Lionel", "Rosalind", "Simon"},
-		last:  []string{"Hastings", "Marlowe", "Poirot", "Moriarty", "Holmes", "Blackwell", "Ashcroft", "Quinn", "Frost", "Sterling"},
-		epithets: []string{"Sharp", "Curious", "Careful", "Keen", "Subtle", "Patient", "Wary", "Clever", "Watchful", "Skeptical"},
-	},
-	"post-apocalyptic": {
-		first: []string{"Ash", "Scout", "Rust", "Kael", "Mira", "Tank", "Juno", "Cinder", "Rook", "Fern", "Rider", "Nox", "Tess", "Bram", "Wren"},
-		last:  []string{"Scavenger", "Walker", "Dustborn", "Last", "Drifter", "Wasteland", "Ash", "Iron", "Rook", "Hollow"},
-		epithets: []string{"Scavenging", "Dusty", "Hard", "Wary", "Scarred", "Steadfast", "Grim", "Fierce", "Last", "Rugged"},
-	},
-	"supernatural": {
-		first: []string{"Cassian", "Luna", "Rowan", "Iris", "Silas", "Aurelia", "Mira", "Jude", "Elena", "Orion", "Naomi", "Lucian", "Wren", "Celeste", "Dorian"},
-		last:  []string{"Moonshadow", "Grimwood", "Starling", "Ravenwood", "Nightfall", "Ashthorne", "Hollow", "Blackwell", "Storm", "Wraith"},
-		epithets: []string{"Veiled", "Otherworldly", "Cursed", "Ethereal", "Shadowed", "Ancient", "Fated", "Silent", "Dreaming", "Strange"},
-	},
-	"steampunk": {
-		first: []string{"Thaddeus", "Emmeline", "Barnaby", "Clara", "Horatio", "Gwendolyn", "Alfred", "Rosalind", "Cornelius", "Mabel", "Ignatius", "Violet", "Reginald", "Beatrice", "Phineas"},
-		last:  []string{"Cogsworth", "Brasswell", "Gearhart", "Copperfield", "Steamwright", "Ironclad", "Bolton", "Pembroke", "Finch", "Winchester"},
-		epithets: []string{"Inventive", "Clockwork", "Brass", "Goggled", "Mechanical", "Steadfast", "Curious", "Polished", "Bold", "Tinkering"},
-	},
-	"xianxia": {
-		first: []string{"Lin", "Wei", "Xiao", "Yue", "Chen", "Feng", "Rou", "Jian", "Mei", "Long", "Huan", "Qing", "Zhi", "Lian", "Yan"},
-		last:  []string{"Wuxia", "Tianfeng", "Yunhai", "Qinglian", "Xuanji", "Long", "Jiang", "Bai", "Shen", "Zhou"},
-		epithets: []string{"Eternal", "Celestial", "Azure", "Drifting", "Unbroken", "Radiant", "Serene", "Ancient", "Boundless", "Phoenix"},
-	},
-	"isekai": {
-		first: []string{"Kazuki", "Aoi", "Rei", "Sora", "Mio", "Haruto", "Yuki", "Ren", "Emi", "Daichi", "Rin", "Itsuki", "Kaede", "Takeshi", "Nao"},
-		last:  []string{"Yamada", "Sato", "Tanaka", "Suzuki", "Takahashi", "Kobayashi", "Nakamura", "Ito", "Watanabe", "Kimura"},
-		epithets: []string{"Otherworld", "Reborn", "Summoned", "Awakened", "Drifting", "Fated", "Stray", "Brave", "Lost", "Chosen"},
-	},
-	"noir": {
-		first: []string{"Sam", "Vera", "Jack", "Lola", "Mickey", "Dolores", "Frank", "Irene", "Vincent", "Gloria", "Eddie", "Ruby", "Tony", "Sadie", "Danny"},
-		last:  []string{"Sullivan", "O'Brien", "Moretti", "Caruso", "Finn", "Delacroix", "Volkov", "Castellano", "Doyle", "Brennan"},
-		epithets: []string{"Hardboiled", "Crooked", "Broken", "Smoking", "Slick", "Jaded", "Cold", "Lucky", "Bitter", "Sly"},
-	},
+type nameFormat struct {
+	parts  []segmentProfile
+	joiner string
+}
+
+type nameProfile struct {
+	formats []nameFormat
+}
+
+func profileForGenre(genre string) nameProfile {
+	lower := strings.ToLower(strings.TrimSpace(genre))
+	switch lower {
+	case "romance":
+		return lyricalNameProfile()
+	case "cyberpunk":
+		return cyberpunkNameProfile()
+	case "horror":
+		return gothicNameProfile()
+	case "sci-fi":
+		return astralNameProfile()
+	case "mystery":
+		return sleuthNameProfile()
+	case "post-apocalyptic":
+		return wastelandNameProfile()
+	case "supernatural":
+		return etherealNameProfile()
+	case "steampunk":
+		return brassNameProfile()
+	case "xianxia":
+		return jadeNameProfile()
+	case "isekai":
+		return brightKanaNameProfile()
+	case "noir":
+		return noirNameProfile()
+	case "adventure", "fantasy adventure":
+		return mythicNameProfile()
+	}
+
+	if domain.IsKidsGenre(genre) {
+		switch lower {
+		case "fantasi", "dongeng klasik", "budaya dan folklor", "mistik":
+			return kidsWonderNameProfile()
+		case "sains dan teknologi", "fiksyen sains kanak-kanak", "edukasi", "inspirasi":
+			return kidsDiscoveryNameProfile()
+		default:
+			return kidsWarmNameProfile()
+		}
+	}
+
+	return neutralNameProfile()
+}
+
+func buildProceduralName(profile nameProfile, rng *seededRNG) string {
+	if len(profile.formats) == 0 {
+		profile = neutralNameProfile()
+	}
+	format := profile.formats[rng.intn(len(profile.formats))]
+	parts := make([]string, 0, len(format.parts))
+	for _, spec := range format.parts {
+		part := buildSegment(spec, rng)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, format.joiner)
+}
+
+func buildSegment(spec segmentProfile, rng *seededRNG) string {
+	if spec.minSyllables <= 0 {
+		spec.minSyllables = 1
+	}
+	if spec.maxSyllables < spec.minSyllables {
+		spec.maxSyllables = spec.minSyllables
+	}
+	count := spec.minSyllables
+	if spec.maxSyllables > spec.minSyllables {
+		count += rng.intn(spec.maxSyllables - spec.minSyllables + 1)
+	}
+
+	var b strings.Builder
+	if len(spec.prefixes) > 0 && rng.intn(100) < spec.prefixChance {
+		b.WriteString(rng.pickString(spec.prefixes))
+	}
+
+	for i := 0; i < count; i++ {
+		onset := ""
+		if len(spec.onsets) > 0 && !(i == 0 && rng.intn(100) < spec.openVowelChance) {
+			onset = rng.pickString(spec.onsets)
+		}
+		vowel := rng.pickString(spec.vowels)
+		coda := ""
+		if len(spec.codas) > 0 {
+			if i == count-1 || rng.intn(100) < spec.midCodaChance {
+				coda = rng.pickString(spec.codas)
+			}
+		}
+		b.WriteString(onset)
+		b.WriteString(vowel)
+		b.WriteString(coda)
+	}
+
+	if len(spec.suffixes) > 0 && rng.intn(100) < spec.suffixChance {
+		b.WriteString(rng.pickString(spec.suffixes))
+	}
+
+	return smoothGeneratedPart(b.String())
+}
+
+func smoothGeneratedPart(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	lower := strings.ToLower(raw)
+	var b strings.Builder
+	var prev rune
+	repeats := 0
+	for i, r := range lower {
+		if i > 0 && r == prev {
+			repeats++
+			if repeats >= 2 {
+				continue
+			}
+		} else {
+			repeats = 0
+		}
+		b.WriteRune(r)
+		prev = r
+	}
+	out := b.String()
+	replacer := strings.NewReplacer(
+		"'''", "'",
+		"--", "-",
+		"aae", "ae",
+		"eea", "ea",
+		"iio", "io",
+		"uua", "ua",
+	)
+	return replacer.Replace(out)
+}
+
+func normalizeGeneratedName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Fields(raw)
+	for i, part := range parts {
+		parts[i] = titleCaseToken(part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func titleCaseToken(token string) string {
+	pieces := strings.Split(token, "-")
+	for i, piece := range pieces {
+		pieces[i] = capitalize(piece)
+	}
+	return strings.Join(pieces, "-")
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(strings.ToLower(s))
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+func mythicNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "br", "c", "cl", "d", "dr", "f", "g", "gl", "k", "kr", "l", "m", "n", "r", "s", "st", "t", "th", "v"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ae", "ia", "io", "oa"},
+		codas:           []string{"", "n", "r", "s", "l", "m", "th", "nd", "ric", "ra"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 12,
+		midCodaChance:   20,
+	}
+	family := segmentProfile{
+		onsets:          []string{"ash", "black", "bright", "dawn", "dr", "fair", "fell", "iron", "moon", "moss", "north", "raven", "storm", "thorn", "vale", "wind", "wyr"},
+		vowels:          []string{"a", "e", "i", "o", "u", "oa", "ea"},
+		codas:           []string{"", "n", "r", "s", "d", "th", "wood", "hart", "born", "veil"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   30,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func lyricalNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "cl", "d", "f", "h", "j", "l", "m", "n", "r", "s", "t", "v"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia", "ea", "io", "ai"},
+		codas:           []string{"", "n", "l", "r", "s", "m", "na", "ra", "elle", "ine"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 20,
+		midCodaChance:   15,
+	}
+	family := segmentProfile{
+		onsets:          []string{"bell", "car", "del", "ever", "fair", "laur", "mor", "ros", "val", "whit"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ea", "io"},
+		codas:           []string{"", "n", "l", "r", "tte", "line", "vale", "mont"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 10,
+		midCodaChance:   15,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func cyberpunkNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"c", "cr", "d", "dr", "j", "k", "kr", "n", "q", "r", "s", "sk", "sy", "t", "tr", "v", "x", "z"},
+		vowels:          []string{"a", "e", "i", "o", "u", "y", "ae", "io"},
+		codas:           []string{"", "k", "n", "x", "z", "v", "r", "s", "th", "q"},
+		prefixes:        []string{"neo", "syn", "vox"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 8,
+		midCodaChance:   35,
+		prefixChance:    18,
+	}
+	family := segmentProfile{
+		onsets:          []string{"byte", "cry", "grid", "hex", "ion", "kry", "nex", "pulse", "rax", "volt", "wire", "zen"},
+		vowels:          []string{"a", "e", "i", "o", "u", "y"},
+		codas:           []string{"", "n", "r", "x", "v", "k", "sh"},
+		suffixes:        []string{"-ix", "-01", "-vx"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 0,
+		midCodaChance:   30,
+		suffixChance:    15,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: "-"},
+	}}
+}
+
+func gothicNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "bl", "c", "cr", "d", "g", "gr", "l", "m", "n", "r", "s", "v", "w"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ae", "io"},
+		codas:           []string{"", "n", "r", "s", "l", "m", "th", "d", "mour", "vane"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 10,
+		midCodaChance:   25,
+	}
+	family := segmentProfile{
+		onsets:          []string{"black", "crow", "dread", "grave", "hallow", "mourn", "night", "pale", "rav", "wither"},
+		vowels:          []string{"a", "e", "i", "o", "u", "oa"},
+		codas:           []string{"", "n", "r", "th", "wood", "mere", "fall", "croft"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   25,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func astralNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"a", "c", "el", "f", "h", "k", "l", "m", "n", "r", "s", "t", "v", "x", "z"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ae", "ia", "io", "oa", "ui"},
+		codas:           []string{"", "n", "r", "s", "l", "x", "th", "ra", "ron"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 18,
+		midCodaChance:   18,
+	}
+	family := segmentProfile{
+		onsets:          []string{"astro", "cel", "nova", "orbit", "quasar", "sol", "stell", "vega", "zen"},
+		vowels:          []string{"a", "e", "i", "o", "u", "io", "oa"},
+		codas:           []string{"", "n", "r", "s", "x", "is", "ion"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 10,
+		midCodaChance:   18,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func sleuthNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"a", "b", "c", "d", "f", "g", "h", "l", "m", "p", "r", "s", "t", "v", "w"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ai", "ea"},
+		codas:           []string{"", "n", "r", "s", "l", "m", "d", "tt", "son"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 12,
+		midCodaChance:   22,
+	}
+	family := segmentProfile{
+		onsets:          []string{"ash", "black", "bram", "croft", "frost", "mar", "quill", "ster", "thorn", "wren"},
+		vowels:          []string{"a", "e", "i", "o", "u", "oa"},
+		codas:           []string{"", "n", "r", "s", "ford", "well", "ham", "croft"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   25,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+	}}
+}
+
+func wastelandNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "d", "f", "g", "k", "m", "n", "r", "s", "t", "w", "z"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ae"},
+		codas:           []string{"", "k", "n", "r", "x", "sh", "sk", "m", "t"},
+		prefixes:        []string{"dust", "rust"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   35,
+		prefixChance:    14,
+	}
+	family := segmentProfile{
+		onsets:          []string{"ash", "bar", "cairn", "dune", "flint", "grim", "iron", "scar", "stone", "thorn"},
+		vowels:          []string{"a", "e", "i", "o", "u"},
+		codas:           []string{"", "n", "r", "k", "d", "fall", "mark", "wind"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   28,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: "-"},
+	}}
+}
+
+func etherealNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"a", "el", "f", "h", "l", "m", "n", "r", "s", "th", "v", "y"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ae", "ea", "ia", "io", "ui"},
+		codas:           []string{"", "n", "r", "l", "s", "th", "riel", "vyn"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 25,
+		midCodaChance:   12,
+	}
+	family := segmentProfile{
+		onsets:          []string{"moon", "night", "raven", "shade", "silver", "star", "veil", "whisper", "wisp"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia"},
+		codas:           []string{"", "n", "r", "l", "fall", "mere", "bloom"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 10,
+		midCodaChance:   15,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func brassNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"al", "bar", "cl", "ed", "f", "g", "h", "m", "p", "r", "t", "v"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ea", "io"},
+		codas:           []string{"", "n", "r", "l", "s", "d", "ric", "bert", "ton"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 10,
+		midCodaChance:   22,
+	}
+	family := segmentProfile{
+		onsets:          []string{"brass", "cog", "copper", "gear", "iron", "penny", "steam", "tin", "whit"},
+		vowels:          []string{"a", "e", "i", "o", "u"},
+		codas:           []string{"", "n", "r", "l", "ford", "well", "wright", "croft"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 5,
+		midCodaChance:   24,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+	}}
+}
+
+func jadeNameProfile() nameProfile {
+	family := segmentProfile{
+		onsets:          []string{"b", "c", "f", "h", "j", "l", "m", "q", "s", "w", "x", "y", "z", "zh"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia", "iu", "ao"},
+		codas:           []string{"", "n", "ng"},
+		minSyllables:    1,
+		maxSyllables:    1,
+		openVowelChance: 5,
+		midCodaChance:   0,
+	}
+	given := segmentProfile{
+		onsets:          []string{"b", "ch", "d", "f", "g", "h", "j", "l", "m", "q", "r", "s", "t", "w", "x", "y", "z", "zh"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ai", "ao", "ia", "ie", "iu", "uo"},
+		codas:           []string{"", "n", "ng"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 3,
+		midCodaChance:   5,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{family, given}, joiner: " "},
+		{parts: []segmentProfile{family, given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+	}}
+}
+
+func brightKanaNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"k", "s", "t", "n", "h", "m", "r", "y", "w", "sh", "ch", "ts"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ya", "yo", "yu"},
+		codas:           []string{"", "n"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 4,
+		midCodaChance:   0,
+	}
+	family := segmentProfile{
+		onsets:          []string{"a", "i", "k", "m", "n", "s", "t", "y", "h", "f", "w"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ai", "ei", "ou"},
+		codas:           []string{"", "n"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 10,
+		midCodaChance:   0,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{family, given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func noirNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "d", "f", "g", "j", "l", "m", "r", "s", "t", "v"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ea"},
+		codas:           []string{"", "n", "r", "s", "l", "m", "ck", "tt", "d"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 8,
+		midCodaChance:   25,
+	}
+	family := segmentProfile{
+		onsets:          []string{"bard", "car", "del", "finn", "gray", "marl", "more", "sull", "val", "voss"},
+		vowels:          []string{"a", "e", "i", "o", "u"},
+		codas:           []string{"", "n", "r", "s", "o", "an", "ett", "ero"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 4,
+		midCodaChance:   20,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+	}}
+}
+
+func kidsWarmNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "d", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "t", "w", "y"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ai", "ia"},
+		codas:           []string{"", "n", "m", "l", "r"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 10,
+		midCodaChance:   8,
+	}
+	family := segmentProfile{
+		onsets:          []string{"ba", "da", "ka", "la", "ma", "na", "ra", "sa", "ta"},
+		vowels:          []string{"a", "e", "i", "o", "u"},
+		codas:           []string{"", "n", "m", "h"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 15,
+		midCodaChance:   5,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
+}
+
+func kidsWonderNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "d", "f", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "w", "y"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia", "io", "ai"},
+		codas:           []string{"", "n", "l", "r", "m"},
+		suffixes:        []string{"ya", "ri", "na"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 15,
+		midCodaChance:   6,
+		suffixChance:    14,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+	}}
+}
+
+func kidsDiscoveryNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"a", "b", "c", "d", "f", "g", "k", "l", "m", "n", "p", "r", "s", "t", "v", "z"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia", "io"},
+		codas:           []string{"", "n", "m", "r", "s"},
+		prefixes:        []string{"di", "ki", "ri"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 18,
+		midCodaChance:   10,
+		prefixChance:    12,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, given}, joiner: " "},
+	}}
+}
+
+func neutralNameProfile() nameProfile {
+	given := segmentProfile{
+		onsets:          []string{"b", "c", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "t", "v", "w", "y", "z"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ai", "ia", "io"},
+		codas:           []string{"", "n", "r", "s", "l", "m"},
+		minSyllables:    2,
+		maxSyllables:    3,
+		openVowelChance: 15,
+		midCodaChance:   12,
+	}
+	family := segmentProfile{
+		onsets:          []string{"b", "c", "d", "f", "g", "k", "l", "m", "n", "r", "s", "t", "v", "w"},
+		vowels:          []string{"a", "e", "i", "o", "u", "ia"},
+		codas:           []string{"", "n", "r", "s", "l", "m", "d"},
+		minSyllables:    1,
+		maxSyllables:    2,
+		openVowelChance: 10,
+		midCodaChance:   12,
+	}
+	return nameProfile{formats: []nameFormat{
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given}, joiner: " "},
+		{parts: []segmentProfile{given, family}, joiner: " "},
+	}}
 }
 
 // seededRNG is a tiny deterministic PRNG for name generation.
@@ -279,9 +796,26 @@ func IsValidNameRequest(name string) bool {
 	return true
 }
 
-// FallbackName returns a sensible default when the user name is rejected.
-func FallbackName() string {
-	return "Traveler"
+// FallbackName returns a procedurally generated name when the user-supplied
+// name is rejected.
+func FallbackName(genre string) string {
+	seed := time.Now().UnixNano() + int64(randInt(1<<20))
+	rng := newSeededRNG(seed)
+	profile := profileForGenre(genre)
+	safety := NewSafetyFilter()
+	for attempt := 0; attempt < 8; attempt++ {
+		name := normalizeGeneratedName(buildProceduralName(profile, rng))
+		if name != "" && safety.IsSafeName(name) {
+			return name
+		}
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		name := normalizeGeneratedName(buildProceduralName(neutralNameProfile(), rng))
+		if name != "" && safety.IsSafeName(name) {
+			return name
+		}
+	}
+	return normalizeGeneratedName(buildProceduralName(kidsWarmNameProfile(), rng))
 }
 
 // NewUniqueNameGeneratorForTests exposes a generator seeded with a fixed seed

@@ -10,24 +10,14 @@
 const KIDS_GENRES = [
     { value: "Pengembaraan",           label: "Pengembaraan" },
     { value: "Fantasi",                label: "Fantasi" },
-    { value: "Dongeng Klasik",          label: "Dongeng Klasik" },
-    { value: "Fabel",                   label: "Fabel" },
     { value: "Cerita Haiwan",           label: "Cerita Haiwan" },
-    { value: "Cerita Sebelum Tidur",    label: "Cerita Sebelum Tidur" },
-    { value: "Edukasi",                 label: "Edukasi" },
-    { value: "Persahabatan",            label: "Persahabatan" },
+    { value: "Kisah Dongeng",           label: "Kisah Dongeng" },
     { value: "Keluarga",                label: "Keluarga" },
-    { value: "Humor",                   label: "Humor" },
-    { value: "Misteri Kanak-kanak",     label: "Misteri Kanak-kanak" },
-    { value: "Fiksyen Sains Kanak-kanak", label: "Fiksyen Sains" },
-    { value: "Fiksyen Sejarah",         label: "Fiksyen Sejarah" },
-    { value: "Alam dan Persekitaran",   label: "Alam & Persekitaran" },
-    { value: "Membesar",                label: "Membesar" },
-    { value: "Budaya dan Folklor",      label: "Budaya & Folklor" },
-    { value: "Mistik",                  label: "Mistik" },
-    { value: "Cerita Interaktif",       label: "Cerita Interaktif" },
-    { value: "Sains dan Teknologi",     label: "Sains & Teknologi" },
-    { value: "Inspirasi",              label: "Inspirasi" },
+    { value: "Kelakar",                 label: "Kelakar" },
+    { value: "Persahabatan",            label: "Persahabatan" },
+    { value: "Inspirasi",               label: "Inspirasi" },
+    { value: "Sains & Teknologi",       label: "Sains & Teknologi" },
+    { value: "Mistik/Misteri",          label: "Mistik/Misteri" },
 ];
 
 const DOM = {
@@ -41,7 +31,6 @@ const DOM = {
     storyImageFrame: document.getElementById('story-image-frame'),
     storyImage: document.getElementById('story-image'),
     imageLoading: document.getElementById('image-loading'),
-    characterPanel: document.getElementById('character-panel'),
     storyError: document.getElementById('story-error'),
     storyErrorText: document.getElementById('story-error-text'),
     retryBtn: document.getElementById('retry-btn'),
@@ -51,6 +40,9 @@ const DOM = {
     genreGrid: document.getElementById('genre-grid'),
 };
 
+const IMAGE_RETRY_LIMIT = 3;
+const IMAGE_RETRY_DELAY_MS = 1200;
+
 let currentSessionId = null;
 let lastStartPayload = null;
 let lastChoiceIndex = null;
@@ -59,6 +51,7 @@ let retryAction = 'start';
 let retryCooldownUntil = 0;
 let selectedGenre = null;
 let currentChoices = [];
+let activeImageRequestToken = 0;
 
 // ═══ INITIALIZATION ═══
 
@@ -259,26 +252,28 @@ function renderTurn(data) {
         DOM.chapterTitle.textContent = data.chapter_title;
     }
 
-    // Turn indicator for kids (Turn X of 5)
-    if (data.status === 'game_over') {
+    if (data.page_label) {
+        DOM.turnIndicator.textContent = data.status === 'game_over'
+            ? `${data.page_label} • Tamat`
+            : data.page_label;
+    } else if (data.status === 'game_over') {
         DOM.turnIndicator.textContent = 'Tamat';
     } else if (data.word_count !== undefined) {
         DOM.turnIndicator.textContent = '';
     }
 
     if (data.syllable_split) {
-        renderStory(data.syllable_split, data.image_url, data.character_profiles);
+        renderStory(data.syllable_split, data.image_url);
     } else {
-        renderStory(data.story, data.image_url, data.character_profiles);
+        renderStory(data.story, data.image_url);
     }
 
     renderChoices(data.choices, data.status);
 }
 
-function renderStory(text, imageUrl, characterProfiles) {
+function renderStory(text, imageUrl) {
     DOM.storyLog.innerHTML = '';
     renderStoryImage(imageUrl);
-    renderCharacterPanel(characterProfiles);
     const p = document.createElement('p');
     p.innerHTML = text;
     DOM.storyLog.appendChild(p);
@@ -288,6 +283,9 @@ function renderStory(text, imageUrl, characterProfiles) {
 
 function renderStoryImage(imageUrl) {
     if (!DOM.storyImage || !DOM.storyImageFrame || !DOM.imageLoading) return;
+
+    activeImageRequestToken += 1;
+    const requestToken = activeImageRequestToken;
 
     DOM.storyImage.onload = null;
     DOM.storyImage.onerror = null;
@@ -308,7 +306,16 @@ function renderStoryImage(imageUrl) {
     DOM.storyImage.style.display = 'none';
     DOM.storyImage.alt = 'Gambar cerita semasa sedang dimuatkan';
 
+    loadStoryImageWithRetry(imageUrl, requestToken, 1);
+}
+
+function loadStoryImageWithRetry(imageUrl, requestToken, attempt) {
+    if (requestToken !== activeImageRequestToken) return;
+
+    const cacheBustedUrl = appendImageRetryParams(imageUrl, attempt);
+
     DOM.storyImage.onload = () => {
+        if (requestToken !== activeImageRequestToken) return;
         DOM.imageLoading.style.display = 'none';
         DOM.storyImage.alt = 'Gambar cerita semasa';
         DOM.storyImage.style.display = 'block';
@@ -316,35 +323,31 @@ function renderStoryImage(imageUrl) {
     };
 
     DOM.storyImage.onerror = () => {
+        if (requestToken !== activeImageRequestToken) return;
+
+        if (attempt < IMAGE_RETRY_LIMIT) {
+            DOM.imageLoading.innerHTML = `<div class="spinner image-spinner"></div><p>Memuat semula gambar... (${attempt + 1}/${IMAGE_RETRY_LIMIT})</p>`;
+            DOM.imageLoading.style.display = 'flex';
+            window.setTimeout(() => {
+                loadStoryImageWithRetry(imageUrl, requestToken, attempt + 1);
+            }, IMAGE_RETRY_DELAY_MS);
+            return;
+        }
+
         DOM.storyImage.removeAttribute('src');
         DOM.storyImage.style.display = 'none';
         DOM.storyImageFrame.classList.add('image-error');
-        DOM.imageLoading.innerHTML = '<p>Gambar belum berjaya dimuat. Cerita masih boleh dibaca.</p>';
+        DOM.imageLoading.innerHTML = '<p>Gambar belum berjaya dimuat selepas 3 cubaan. Cerita masih boleh dibaca.</p>';
         DOM.imageLoading.style.display = 'flex';
     };
 
-    DOM.storyImage.src = imageUrl;
+    DOM.storyImage.src = cacheBustedUrl;
 }
 
-function renderCharacterPanel(characterProfiles) {
-    if (!DOM.characterPanel) return;
-    const profiles = characterProfiles || {};
-    const chars = Object.values(profiles).slice(0, 3);
-    DOM.characterPanel.innerHTML = '';
-    if (!chars.length) {
-        DOM.characterPanel.style.display = 'none';
-        return;
-    }
-    DOM.characterPanel.style.display = 'flex';
-    chars.forEach((c) => {
-        const item = document.createElement('div');
-        item.className = 'character-chip';
-        const traits = Array.isArray(c.traits) ? c.traits.slice(0, 2).join(', ') : '';
-        item.textContent = `${c.name || 'Watak'} — ${c.role || c.relation_to_pc || 'kawan'}${traits ? ' · ' + traits : ''}`;
-        DOM.characterPanel.appendChild(item);
-    });
+function appendImageRetryParams(imageUrl, attempt) {
+    const separator = imageUrl.includes('?') ? '&' : '?';
+    return `${imageUrl}${separator}img_retry=${attempt}&img_ts=${Date.now()}`;
 }
-
 function renderChoices(choices, status) {
     DOM.choicesContainer.innerHTML = '';
 

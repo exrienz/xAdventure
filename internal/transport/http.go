@@ -2,13 +2,13 @@ package transport
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"image"
-	_ "image/jpeg"
-	"image/png"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -96,24 +96,17 @@ func handleKidsImage(cfg *config.Config) http.HandlerFunc {
 			http.Error(w, "prompt is required", http.StatusBadRequest)
 			return
 		}
-		if cfg.OpenAIKey == "" {
+		if !cfg.HasImageRouterProvider() {
 			http.Error(w, "image generation is not configured", http.StatusServiceUnavailable)
 			return
 		}
-		model := strings.TrimSpace(cfg.OpenAIImageModel)
-		if model == "" {
-			model = "gpt-image-1"
-		}
 
 		payload := map[string]interface{}{
-			"model":         model,
+			"model":         cfg.ImageRouterModel,
 			"prompt":        prompt,
-			"n":             1,
-			"size":          "auto",
-			"quality":       "auto",
-			"background":    "auto",
-			"image_detail":  "high",
-			"output_format": "png",
+			"quality":       "low",
+			"size":          "1024x1024",
+			"output_format": "jpeg",
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -121,17 +114,19 @@ func handleKidsImage(cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
-		base := strings.TrimRight(cfg.OpenAIBase, "/")
-		if base == "" {
-			base = "https://llm.code-x.my/v1"
-		}
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/images/generations?response_format=binary", bytes.NewReader(body))
+		base := strings.TrimRight(cfg.ImageRouterBase, "/")
+		slog.Info("kids_image_provider_selected",
+			"provider_base", cfg.ImageRouterBase,
+			"endpoint", base+"/images/generations",
+			"model", cfg.ImageRouterModel,
+		)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, base+"/images/generations", bytes.NewReader(body))
 		if err != nil {
 			http.Error(w, "failed to build upstream request", http.StatusInternalServerError)
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+cfg.OpenAIKey)
+		req.Header.Set("Authorization", "Bearer "+cfg.ImageRouterKey)
 		req.Header.Set("User-Agent", "xadventure/1.0")
 
 		client := &http.Client{Timeout: time.Duration(cfg.LLMTimeoutSec) * time.Second}
@@ -150,34 +145,126 @@ func handleKidsImage(cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
-		imageBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			http.Error(w, "failed to read image", http.StatusBadGateway)
+		if err := writeImageResponse(w, r, client, resp, base); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		pngBytes := ensurePNG(imageBytes)
-		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Cache-Control", "private, max-age=86400")
-		_, _ = w.Write(pngBytes)
 	}
 }
 
-func ensurePNG(imageBytes []byte) []byte {
-	if len(imageBytes) >= 8 && bytes.Equal(imageBytes[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
-		return imageBytes
-	}
-	if len(imageBytes) >= 2 && imageBytes[0] == 0xff && imageBytes[1] == 0xd8 {
-		img, _, err := image.Decode(bytes.NewReader(imageBytes))
+type imageGenerationResponse struct {
+	Data []struct {
+		B64JSON string `json:"b64_json"`
+		URL     string `json:"url"`
+	} `json:"data"`
+}
+
+func writeImageResponse(w http.ResponseWriter, r *http.Request, client *http.Client, upstream *http.Response, providerBase string) error {
+	contentType := upstream.Header.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		imageBytes, err := io.ReadAll(upstream.Body)
 		if err != nil {
-			return imageBytes
+			return errors.New("failed to read image bytes")
 		}
-		var out bytes.Buffer
-		if err := png.Encode(&out, img); err != nil {
-			return imageBytes
-		}
-		return out.Bytes()
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		_, _ = w.Write(imageBytes)
+		return nil
 	}
-	return imageBytes
+
+	body, err := io.ReadAll(upstream.Body)
+	if err != nil {
+		return errors.New("failed to read image response")
+	}
+
+	var payload imageGenerationResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Error("kids_image_unexpected_response",
+			"provider_base", providerBase,
+			"content_type", contentType,
+			"body_preview", string(body[:min(len(body), 200)]),
+		)
+		return errors.New("image provider returned an unexpected response format")
+	}
+	if len(payload.Data) == 0 {
+		return errors.New("image provider returned no image data")
+	}
+
+	item := payload.Data[0]
+	switch {
+	case strings.TrimSpace(item.B64JSON) != "":
+		imageBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
+		if err != nil {
+			return errors.New("failed to decode image data")
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		_, _ = w.Write(imageBytes)
+		return nil
+	case strings.TrimSpace(item.URL) != "":
+		return proxyRemoteImage(w, r, client, providerBase, item.URL)
+	default:
+		return errors.New("image provider returned empty image data")
+	}
+}
+
+func proxyRemoteImage(w http.ResponseWriter, r *http.Request, client *http.Client, providerBase, imageURL string) error {
+	resolvedURL, err := resolveImageURL(providerBase, imageURL)
+	if err != nil {
+		return errors.New("image provider returned an invalid image URL")
+	}
+	slog.Info("kids_image_fetching_remote_asset", "provider_base", providerBase, "asset_url", resolvedURL)
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, resolvedURL, nil)
+	if err != nil {
+		return errors.New("failed to build image asset request")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.New("failed to fetch remote image asset")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return errors.New("remote image asset request failed")
+	}
+
+	imageBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return errors.New("failed to read remote image asset")
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		contentType = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	_, _ = w.Write(imageBytes)
+	return nil
+}
+
+func resolveImageURL(providerBase, imageURL string) (string, error) {
+	if strings.TrimSpace(imageURL) == "" {
+		return "", errors.New("empty image URL")
+	}
+	parsed, err := url.Parse(imageURL)
+	if err != nil {
+		return "", err
+	}
+	if parsed.IsAbs() {
+		return parsed.String(), nil
+	}
+	base, err := url.Parse(strings.TrimRight(providerBase, "/") + "/")
+	if err != nil {
+		return "", err
+	}
+	return base.ResolveReference(parsed).String(), nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func handleStart(engine *service.Engine, cfg *config.Config) http.HandlerFunc {
@@ -202,6 +289,7 @@ func handleStart(engine *service.Engine, cfg *config.Config) http.HandlerFunc {
 
 		resp := map[string]interface{}{
 			"session_id":     session.ID,
+			"user_name":      session.UserName,
 			"state":          session.State,
 			"story":          log.Content,
 			"syllable_split": log.ColorCodedContent,
@@ -211,6 +299,11 @@ func handleStart(engine *service.Engine, cfg *config.Config) http.HandlerFunc {
 			"age":            session.Age,
 			"age_group":      kidsAgeGroup(session.Genre, session.Age),
 			"word_count":     service.CountWords(log.Content),
+		}
+		if domain.IsKidsGenre(session.Genre) {
+			resp["page_number"] = log.TurnNumber
+			resp["total_pages"] = service.KidsStoryPageCount
+			resp["page_label"] = service.KidsPageIndicator(log.TurnNumber)
 		}
 		addKidsStorybookFields(resp, cfg, session, log)
 
@@ -276,9 +369,8 @@ func addKidsStorybookFields(resp map[string]interface{}, cfg *config.Config, ses
 	if session == nil || log == nil || !domain.IsKidsGenre(session.Genre) || !cfg.FeatureEnabled("kids_storybook_v2") {
 		return
 	}
-	resp["character_profiles"] = session.State.Entities
-	resp["image_prompt"] = service.BuildKidsImagePrompt(log.ImageScene, session.State.Entities, session.Genre, session.Age)
-	resp["image_url"] = service.KidsImageURL(log.ImageScene, session.State.Entities, session.Genre, session.Age)
+	resp["image_prompt"] = service.BuildKidsImagePrompt(log.ImageScene, session.State.VisualSetting, session.State.Entities, session.Genre, session.Age)
+	resp["image_url"] = service.KidsImageURL(log.ImageScene, session.State.VisualSetting, session.State.Entities, session.Genre, session.Age)
 }
 
 func handleTurn(engine *service.Engine, cfg *config.Config) http.HandlerFunc {
@@ -313,6 +405,11 @@ func handleTurn(engine *service.Engine, cfg *config.Config) http.HandlerFunc {
 			"age":            session.Age,
 			"age_group":      kidsAgeGroup(session.Genre, session.Age),
 			"word_count":     service.CountWords(log.Content),
+		}
+		if domain.IsKidsGenre(session.Genre) {
+			resp["page_number"] = log.TurnNumber
+			resp["total_pages"] = service.KidsStoryPageCount
+			resp["page_label"] = service.KidsPageIndicator(log.TurnNumber)
 		}
 		addKidsStorybookFields(resp, cfg, session, log)
 
@@ -353,6 +450,7 @@ func handleGetSession(engine *service.Engine) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"session_id": session.ID,
+			"user_name":  session.UserName,
 			"state":      session.State,
 			"status":     session.Status,
 			"choices":    session.CurrentChoices,

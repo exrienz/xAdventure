@@ -200,45 +200,23 @@ func GenreDescription(genre string) string {
 	case "noir":
 		return "Rain-slick streets, femme fatales, and moral shadows."
 	// Kids genres
-	case "kids":
-		return "A fun, educational, and very friendly story for young children."
 	case "pengembaraan":
 		return "Pengembaraan menarik, pencarian harta karun, dan penerokaan dunia baru yang selamat untuk kanak-kanak."
 	case "fantasi":
 		return "Dunia ajaib dengan sihir, makhluk mitologi, dan tempat-tempat imaginasi yang menakjubkan."
-	case "dongeng klasik":
+	case "kisah dongeng":
 		return "Dongeng tradisional dengan raja, ratu, sihir, dan pengajaran yang bermakna untuk kanak-kanak."
-	case "fabel":
-		return "Cerita pendek dengan watak haiwan yang mengajar nilai-nilai murni secara jelas dan menyenangkan."
 	case "cerita haiwan":
 		return "Pengembaraan haiwan yang menunjukkan sifat manusia, persahabatan, dan kebaikan hati."
-	case "cerita sebelum tidur":
-		return "Cerita lembut dan menenangkan untuk membantu kanak-kanak berehat sebelum tidur."
-	case "edukasi":
-		return "Cerita yang mengajar nombor, sains, sejarah, atau kemahiran sosial dengan cara yang menyeronokkan."
 	case "persahabatan":
 		return "Tema persahabatan, kerja berpasukan, empati, dan kebaikan hati antara kawan-kawan."
 	case "keluarga":
 		return "Cerita tentang adik-beradik, ibu bapa, datuk nenek, dan hubungan kekeluargaan yang hangat."
-	case "humor":
+	case "kelakar":
 		return "Pengembaraan lucu, situasi jenaka, dan watak-watak yang kelakar untuk kanak-kanak."
-	case "misteri kanak-kanak":
-		return "Misteri sesuai umur dengan petunjuk, teka-teki, dan suspen yang lembut dan menyeronokkan."
-	case "fiksyen sains kanak-kanak":
-		return "Pengembaraan angkasa, robot, ciptaan futuristik, dan dunia alien yang mesra untuk kanak-kanak."
-	case "fiksyen sejarah":
-		return "Cerita rekaan yang berlatarkan zaman sejarah, sesuai untuk kanak-kanak."
-	case "alam dan persekitaran":
-		return "Cerita tentang hidupan liar, pemuliharaan, dan dunia semula jadi yang mengajar sayang kepada alam."
-	case "membesar":
-		return "Watak yang belajar tanggungjawab, keberanian, keyakinan, dan pelajaran hidup yang penting."
-	case "budaya dan folklor":
-		return "Cerita yang diilhamkan oleh tradisi, legenda, dan cerita rakyat dari seluruh dunia."
-	case "mistik":
-		return "Mistik dan musim perayaan seperti Krismas, Halloween, Aidilfitri, dan Tahun Baru Cina."
-	case "cerita interaktif":
-		return "Cerita 'Pilih Pengembaraanmu Sendiri' di mana kanak-kanak boleh membuat keputusan atau menyelesaikan teka-teki mudah."
-	case "sains dan teknologi":
+	case "mistik/misteri":
+		return "Misteri sesuai umur dengan petunjuk, unsur mistik yang lembut, dan suspen yang menyeronokkan untuk kanak-kanak."
+	case "sains & teknologi":
 		return "Cerita yang memperkenalkan konsep sains, teknologi, kejuruteraan, dan matematik secara semula jadi."
 	case "inspirasi":
 		return "Cerita yang menggalakkan ketabahan, kebaikan, kesyukuran, keberanian, dan ketekunan."
@@ -290,10 +268,11 @@ func FormatAsLightNovel(genre string) string {
 - Do NOT use dark, scary, violent, romantic, or overly dramatic themes.
 - The tone must be friendly, encouraging, and playful.
 - Write in third-person limited point of view.
-- End every turn with a simple, engaging question or hook.
-- STORY ARC: The story runs for exactly 5 turns. Turn 1 = Pengenalan (Introduction), Turn 2-3 = Perkembangan (Development), Turn 4 = Klimaks (Climax), Turn 5 = Penyelesaian (Resolution, story ends).
-- Each turn MUST advance the story meaningfully. Do NOT stall or repeat.
-- On Turn 5, the story MUST end completely with a happy, satisfying conclusion and a clear moral lesson. Never leave the story unfinished.`
+- Every page must feel like the next natural step. Never start like the story is already halfway through a crisis.
+- End each non-final page with a simple, engaging question or hook.
+- STORY ARC: The story must last at least 6 pages and at most 10 pages, with a gentle opening, gradual build, and a natural happy ending.
+- If the main problem is fully and satisfyingly resolved on page 6, 7, 8, or 9, you may end there naturally. Otherwise page 10 must be the final ending.
+- Each page MUST advance the story meaningfully. Do NOT stall, skip ahead suddenly, or repeat.`
 	}
 
 	return `Style Rules (Simple English Light Novel):

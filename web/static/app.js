@@ -121,7 +121,7 @@ function setupGame(resp) {
     DOM.initScreen.classList.add('hidden');
     DOM.gameScreen.classList.remove('hidden');
 
-    DOM.charNameDisplay.textContent = document.getElementById('name').value;
+    DOM.charNameDisplay.textContent = resp.user_name || document.getElementById('name').value;
     DOM.archetypeDisplay.textContent = document.getElementById('archetype').value;
 
     updateStateUI(resp.state);
@@ -308,7 +308,7 @@ window.addEventListener('load', async () => {
                     currentSessionId = resp.session_id;
                     DOM.initScreen.classList.add('hidden');
                     DOM.gameScreen.classList.remove('hidden');
-                    DOM.charNameDisplay.textContent = 'Traveler';
+                    DOM.charNameDisplay.textContent = resp.user_name || 'Character';
                     updateStateUI(resp.state);
                     updateChoices(resp.choices);
                 } else {

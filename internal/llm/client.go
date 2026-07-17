@@ -81,6 +81,7 @@ type StateDelta struct {
 	Reputation     map[string]int `json:"reputation_delta"`
 	AddFlags       []string       `json:"add_flags"`
 	RemoveFlags    []string       `json:"remove_flags"`
+	VisualSetting  string         `json:"visual_setting,omitempty"`
 	AddEntities    []EntityDelta  `json:"add_entities"`
 	UpdateEntities []EntityDelta  `json:"update_entities"`
 }
@@ -103,12 +104,13 @@ type FormatHints struct {
 }
 
 type ResponseFormat struct {
-	StoryText   string      `json:"story_text"`
-	Choices     []string    `json:"choices"`
-	StateUpdate StateDelta  `json:"state_update"`
-	FormatHints FormatHints `json:"format_hints"`
-	TwistAdded  bool        `json:"twist_added"`
-	ImageScene  string      `json:"image_scene"`
+	StoryText     string      `json:"story_text"`
+	Choices       []string    `json:"choices"`
+	StateUpdate   StateDelta  `json:"state_update"`
+	FormatHints   FormatHints `json:"format_hints"`
+	TwistAdded    bool        `json:"twist_added"`
+	StoryComplete bool        `json:"story_complete"`
+	ImageScene    string      `json:"image_scene"`
 }
 
 type ChatResponse struct {
