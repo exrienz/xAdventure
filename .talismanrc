@@ -1,0 +1,4 @@
+fileignoreconfig:
+- filename: internal/service/engine.go
+  checksum: 3c8ba1659525ba1cbbdd5b3fe66c4529dd98ecba7d3cd5fb8ebb2fe6a9e9e315
+version: ""

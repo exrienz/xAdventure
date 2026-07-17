@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muz/xadventure/internal/config"
@@ -28,5 +29,40 @@ func TestEngineTextClientForGenreFallsBackWithoutKidsProvider(t *testing.T) {
 
 	if got := engine.textClientForGenre("Fantasi"); got != defaultClient {
 		t.Fatal("expected kids genre to fall back to default client when kids provider is absent")
+	}
+}
+
+func TestDefaultKidsAppearanceUsesKnownCharacterProfileInWatakMode(t *testing.T) {
+	got := defaultKidsAppearance("SpongeBob", "Watak")
+	for _, want := range []string{"yellow sea sponge", "square body", "red tie", "brown square shorts"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("appearance missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestDefaultKidsAppearanceFallsBackToRecognizableCharacterHint(t *testing.T) {
+	got := defaultKidsAppearance("TotoroX", "Watak")
+	if !strings.Contains(got, "recognizable fictional character") {
+		t.Fatalf("expected recognizable character fallback, got %s", got)
+	}
+	if !strings.Contains(got, "TotoroX") {
+		t.Fatalf("expected name to appear in fallback, got %s", got)
+	}
+}
+
+func TestKidsSettingSparkIsDeterministicForSameSeed(t *testing.T) {
+	a := KidsSettingSpark("Fantasi", "abc123")
+	b := KidsSettingSpark("Fantasi", "abc123")
+	if a != b {
+		t.Fatalf("expected deterministic setting spark, got %q vs %q", a, b)
+	}
+}
+
+func TestKidsSettingSparkVariesByGenre(t *testing.T) {
+	a := KidsSettingSpark("Fantasi", "same-seed")
+	b := KidsSettingSpark("Sains & Teknologi", "same-seed")
+	if a == b {
+		t.Fatalf("expected genre-specific variation, both were %q", a)
 	}
 }

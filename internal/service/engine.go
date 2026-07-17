@@ -159,7 +159,7 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 					Gender:       sanitize(req.Gender),
 					Role:         "protagonist",
 					Status:       "active",
-					Appearance:   defaultKidsAppearance(sanitize(req.Gender)),
+					Appearance:   defaultKidsAppearance(userName, sanitize(req.Gender)),
 					Traits:       []string{"curious", "kind", "brave"},
 				},
 			},
@@ -173,6 +173,10 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 	enhanced := e.cfg.FeatureEnabled("enhanced_narrative_logic")
 	systemPrompt := e.getSystemPrompt(req.Genre, archetype, age, enhanced)
 	openingScene := OpeningScene()
+	kidsSettingSpark := ""
+	if domain.IsKidsGenre(req.Genre) {
+		kidsSettingSpark = KidsSettingSpark(req.Genre, seed)
+	}
 
 	nameHint := ""
 	if generated.Name != "" {
@@ -181,9 +185,13 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 
 	languageInstruction := ""
 	pageInstruction := ""
+	characterModeInstruction := ""
+	settingVarietyInstruction := ""
 	if domain.IsKidsGenre(req.Genre) {
-		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. Create a consistent main character profile and 1-2 supporting side character profiles using state_update.add_entities. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also set state_update.visual_setting to a concise ENGLISH reusable storybook background profile for this story world, covering the place, lighting, important props, and atmosphere. Keep that visual setting stable across later pages unless the story truly moves to a new place. Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood). Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
+		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. Create a consistent main character profile and 1-2 supporting side character profiles using state_update.add_entities. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also set state_update.visual_setting to a concise ENGLISH reusable background profile for this story world, covering the place, lighting, important props, and atmosphere. Keep that visual setting stable across later pages unless the story truly moves to a new place. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels. Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
 		pageInstruction = KidsPageInstruction(1, session.Age)
+		characterModeInstruction = kidsCharacterModeInstruction(session.UserName, session.Gender)
+		settingVarietyInstruction = fmt.Sprintf("Setting variety instruction: use this fresh genre-fitting opening spark as inspiration and make the place feel specific, concrete, and new: %s Avoid defaulting to generic parks, flower gardens, plain village houses, or random forests unless the spark or story logic clearly points there.", kidsSettingSpark)
 	}
 
 	userMsg := fmt.Sprintf(`Begin a new serialized light novel.
@@ -192,6 +200,8 @@ Archetype: %s (%s).
 Genre: %s (%s).
 Story seed: %s.
 Opening style: %s
+%s
+%s
 %s
 %s
 %s
@@ -206,6 +216,8 @@ Current State: %s`,
 		nameHint,
 		languageInstruction,
 		pageInstruction,
+		characterModeInstruction,
+		settingVarietyInstruction,
 		stateJSON(session.State),
 	)
 
@@ -348,8 +360,10 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 	}
 
 	languageInstruction := ""
+	characterModeInstruction := ""
 	if domain.IsKidsGenre(session.Genre) {
-		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Reuse the Known Visual Setting exactly when the story is still in the same place. Only change state_update.visual_setting when the story genuinely moves to a new location, and then describe the new stable setting in concise ENGLISH. Also provide image_scene: a concise ENGLISH visual description of what is happening in this scene right now (characters present, their poses/expressions, setting, mood)."
+		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Reuse the Known Visual Setting exactly when the story is still in the same place. Only change state_update.visual_setting when the story genuinely moves to a new location, and then describe the new stable setting in concise ENGLISH. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels."
+		characterModeInstruction = kidsCharacterModeInstruction(session.UserName, session.Gender)
 	} else {
 		languageInstruction = "Use simple, clear English with short sentences."
 	}
@@ -362,6 +376,7 @@ Known Characters: %s
 Known Visual Setting: %s
 
 Continue the story from this choice. %s Advance the plot, reveal character, escalate tension appropriately for the selected genre and age. %s
+%s
 %s
 %s
 Generate the next scene, provide 4 fresh choices, and return state updates.
@@ -377,6 +392,7 @@ Do NOT contradict the known characters or their relationships listed above.`,
 		spontaneousTwist,
 		chapterInstruction,
 		arcInstruction,
+		characterModeInstruction,
 	)
 	messages = append(messages, llm.Message{Role: "user", Content: userMsg})
 
@@ -602,7 +618,7 @@ Schema fields:
 "format_hints": object with chapter_title (string), scene_break (boolean), monologue (boolean or count), dialogue_lines (boolean or count)
 "twist_added": boolean
 "story_complete": boolean
-"image_scene": string — for kids stories, a concise ENGLISH visual description of the current scene for image generation. Describe characters present, their poses/expressions, setting, and mood. Example: "A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood."`
+"image_scene": string — for kids stories, a concise ENGLISH visual description of exactly one frozen moment from the current page for image generation. Describe one situation only: characters present, their poses/expressions, setting, and mood. Do not describe a sequence, before-and-after actions, or multiple scenes. Example: "A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood."`
 
 	style := FormatAsLightNovel(genre)
 	if domain.IsKidsGenre(genre) {
@@ -741,11 +757,62 @@ func (e *Engine) logMetrics(genre, text string, entities map[string]domain.Entit
 	)
 }
 
-func defaultKidsAppearance(gender string) string {
+func defaultKidsAppearance(name, gender string) string {
+	if strings.EqualFold(gender, "Watak") {
+		return knownKidsCharacterAppearance(name)
+	}
 	if strings.EqualFold(gender, "Perempuan") {
 		return "young Malaysian girl with shoulder-length dark hair, yellow short-sleeve shirt, blue skirt, white socks, red shoes"
 	}
 	return "young Malaysian boy with short dark hair, blue short-sleeve shirt, brown shorts, white socks, green shoes"
+}
+
+func kidsCharacterModeInstruction(name, gender string) string {
+	if !strings.EqualFold(gender, "Watak") {
+		return ""
+	}
+	return fmt.Sprintf("CHARACTER MODE: the protagonist name %q refers to an existing fictional character. Keep the iconic species, face, colors, hairstyle, outfit, and overall recognizable look associated with that character. Do not redesign this protagonist into a generic Malaysian child.", name)
+}
+
+func knownKidsCharacterAppearance(name string) string {
+	switch normalizedCharacterKey(name) {
+	case "spongebob", "spongebobsquarepants":
+		return "a cheerful yellow sea sponge with a square body, big blue eyes, buck teeth, white short-sleeve shirt, red tie, brown square shorts, white socks with blue and red stripes, and shiny black shoes"
+	case "patrick", "patrickstar":
+		return "a pink starfish with a round soft body, simple smiling face, and green shorts with purple flower patterns"
+	case "squidward", "squidwardtentacles":
+		return "a light blue-green octopus with a long drooping nose, bald rounded head, and a short-sleeve brown polo shirt"
+	case "twilight", "twilightsparkle":
+		return "a purple pony with a dark indigo mane and tail streaked with pink and violet, large expressive eyes, and a small horn and wings"
+	case "rainbowdash":
+		return "a sky-blue pony with a rainbow-colored mane and tail, magenta eyes, and small wings"
+	case "pinkiepie":
+		return "a bright pink pony with a fluffy curly darker pink mane and tail and cheerful blue eyes"
+	case "fluttershy":
+		return "a pale yellow pony with a long flowing pink mane and tail, gentle teal eyes, and small wings"
+	case "applejack":
+		return "an orange pony with a long blond mane and tail, green eyes, freckles, and a brown cowboy hat"
+	case "rarity":
+		return "a white pony with a curled royal purple mane and tail, blue eyes, and a small horn"
+	case "mylittleponytwilight", "mylittleponytwilightsparkle":
+		return "a purple pony with a dark indigo mane and tail streaked with pink and violet, large expressive eyes, and a small horn and wings"
+	case "mickey", "mickeymouse":
+		return "a black mouse with large round ears, red shorts with white buttons, yellow shoes, and white gloves"
+	case "minnie", "minniemouse":
+		return "a black mouse with large round ears, a big bow, a polka-dot dress, yellow shoes, and white gloves"
+	case "elsa":
+		return "a fair-skinned young woman with a long pale blonde braid, a sparkling icy blue gown, and graceful snow-queen styling"
+	case "anna":
+		return "a fair-skinned young woman with auburn braids, a black bodice over a blue dress, and a magenta cape"
+	default:
+		return fmt.Sprintf("a recognizable fictional character matching the provided name %q, keeping the iconic species, face, hairstyle, colors, outfit, and silhouette commonly associated with that character", name)
+	}
+}
+
+func normalizedCharacterKey(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	replacer := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "", "'", "", "\"", "", ",", "", ":", "", ";", "", "/", "", "\\", "")
+	return replacer.Replace(name)
 }
 
 func stateJSON(state domain.GameState) string {

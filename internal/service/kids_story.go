@@ -435,17 +435,17 @@ func BuildKidsImagePrompt(imageScene, visualSetting string, entities interface{}
 	genre = cleanPromptPart(genre, 40)
 	characters := kidsCharacterVisuals(entities)
 	setting := cleanPromptPart(visualSetting, 180)
-	scene := cleanPromptPart(imageScene, 200)
+	scene := kidsSingleMomentScene(imageScene)
 	if scene == "" {
-		scene = "a bright child-safe storybook scene with the characters present"
+		scene = "a bright child-safe moment with the characters present"
 	}
 	if characters == "" {
 		characters = "consistent child protagonist with clear hair, clothing, shoes, and accessory details"
 	}
 	if setting == "" {
-		setting = fmt.Sprintf("consistent %s storybook world with stable background details, child-safe atmosphere, and matching environment across pages", strings.ToLower(genre))
+		setting = fmt.Sprintf("consistent %s environment with stable background details and a child-safe atmosphere", strings.ToLower(genre))
 	}
-	return fmt.Sprintf("Malaysian children's storybook illustration, age %d, warm cheerful watercolor style, no text, no scary imagery. Create exactly one single full-page illustration for one moment only. No split panels, no comic layout, no collage, no before-and-after frames, no duplicated characters in separate mini-scenes, and no multiple scenes inside one image. Keep the same character designs and story world setting as previous pages of this story. Characters: %s. Story setting: %s. Current page scene: %s.", age, characters, setting, scene)
+	return fmt.Sprintf("A single full-bleed children's watercolor illustration. One camera angle. One continuous environment. One uninterrupted composition. Everything exists in one physical space. Depict one freeze-frame moment in time. No split composition or multiple scenes. Editorial children's illustration, warm Malaysian watercolor style, age %d, no text, no letters, no numbers, no scary imagery. Maintain consistent character designs and environment. Characters: %s. Setting: %s. Scene: %s.", age, characters, setting, scene)
 }
 
 func kidsCharacterVisuals(entities interface{}) string {
@@ -513,6 +513,36 @@ func kidsSceneAction(storyText string) string {
 		}
 	}
 	return cleanPromptPart(strings.Join(parts, ". "), 140)
+}
+
+func kidsSingleMomentScene(imageScene string) string {
+	clean := cleanPromptPart(imageScene, 220)
+	if clean == "" {
+		return ""
+	}
+	sentences := sentenceSplitter.Split(clean, -1)
+	first := ""
+	for _, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if sentence == "" {
+			continue
+		}
+		first = sentence
+		break
+	}
+	if first == "" {
+		first = clean
+	}
+	lower := strings.ToLower(first)
+	for _, marker := range []string{
+		" then ", " after that ", " next ", " suddenly ", " finally ", " later ",
+	} {
+		if idx := strings.Index(lower, marker); idx > 0 {
+			first = strings.TrimSpace(first[:idx])
+			break
+		}
+	}
+	return cleanPromptPart(first, 140)
 }
 
 func cleanPromptPart(text string, maxLen int) string {

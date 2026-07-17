@@ -1,8 +1,12 @@
 package transport
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -165,5 +169,54 @@ func TestHandleKidsImageReturns503WhenImageRouterMissing(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNormalizeKidsStoryImageCropsComicGridToLargestPanel(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 600, 600))
+	white := color.RGBA{255, 255, 255, 255}
+	red := color.RGBA{220, 40, 40, 255}
+	blue := color.RGBA{40, 120, 220, 255}
+	green := color.RGBA{40, 180, 90, 255}
+
+	fillRect(img, img.Bounds(), white)
+	fillRect(img, image.Rect(20, 20, 180, 180), red)
+	fillRect(img, image.Rect(220, 20, 380, 180), red)
+	fillRect(img, image.Rect(420, 20, 580, 180), red)
+	fillRect(img, image.Rect(20, 220, 180, 380), red)
+	fillRect(img, image.Rect(220, 220, 520, 520), blue)
+	fillRect(img, image.Rect(20, 420, 180, 580), red)
+	fillRect(img, image.Rect(420, 220, 580, 380), green)
+	fillRect(img, image.Rect(220, 540, 380, 580), green)
+	fillRect(img, image.Rect(420, 420, 580, 580), green)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 92}); err != nil {
+		t.Fatalf("encode test image: %v", err)
+	}
+
+	out, contentType := normalizeKidsStoryImage(buf.Bytes(), "image/jpeg")
+	if contentType != "image/jpeg" {
+		t.Fatalf("content type = %q; want image/jpeg", contentType)
+	}
+
+	cropped, _, err := image.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decode cropped image: %v", err)
+	}
+	if cropped.Bounds().Dx() >= 600 || cropped.Bounds().Dy() >= 600 {
+		t.Fatalf("expected cropped image smaller than original, got %dx%d", cropped.Bounds().Dx(), cropped.Bounds().Dy())
+	}
+	center := color.RGBAModel.Convert(cropped.At(cropped.Bounds().Dx()/2, cropped.Bounds().Dy()/2)).(color.RGBA)
+	if center.B <= center.R {
+		t.Fatalf("expected crop to keep largest blue panel, got center color %#v", center)
+	}
+}
+
+func fillRect(img *image.RGBA, rect image.Rectangle, c color.RGBA) {
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			img.SetRGBA(x, y, c)
+		}
 	}
 }

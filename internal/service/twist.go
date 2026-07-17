@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"math/big"
 	"strings"
 
@@ -244,6 +245,282 @@ func OpeningScene() string {
 	scenes := []string{"calm", "action", "mystery", "dialogue"}
 	n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(scenes))))
 	return scenes[n.Int64()]
+}
+
+func KidsSettingSpark(genre, seed string) string {
+	profile, ok := kidsSettingProfiles[strings.ToLower(strings.TrimSpace(genre))]
+	if !ok {
+		profile = kidsSettingProfile{
+			places:   []string{"a lively neighborhood corner", "a quiet riverside path", "a bright village square"},
+			features: []string{"fluttering paper lanterns", "a small hidden object", "a surprising sound in the air"},
+			actions:  []string{"someone notices a tiny mystery", "a simple task turns unusual", "a new clue quietly appears"},
+			moods:    []string{"curious and hopeful", "playful but mysterious", "gentle and inviting"},
+		}
+	}
+
+	rng := newSeededRNG(kidsSettingSeed(genre, seed))
+	place := rng.pickString(profile.places)
+	feature := rng.pickString(profile.features)
+	action := rng.pickString(profile.actions)
+	mood := rng.pickString(profile.moods)
+
+	return fmt.Sprintf("%s, with %s, where %s. Mood: %s.", place, feature, action, mood)
+}
+
+type kidsSettingProfile struct {
+	places   []string
+	features []string
+	actions  []string
+	moods    []string
+}
+
+var kidsSettingProfiles = map[string]kidsSettingProfile{
+	"pengembaraan": {
+		places: []string{
+			"a hidden bamboo footpath near a rushing stream",
+			"an old hilltop watchpost overlooking a windy valley",
+			"a narrow trail behind a fruit orchard and a broken fence",
+			"a tiny jetty beside a slow green river",
+			"a forgotten path between rice fields and low stone markers",
+		},
+		features: []string{
+			"a folded map tucked in a bottle",
+			"fresh footprints beside a mossy sign",
+			"a wooden chest key hanging from a ribbon",
+			"a bright compass that trembles softly",
+			"a distant flag moving between the trees",
+		},
+		actions: []string{
+			"a small clue invites the hero to explore farther",
+			"a normal walk suddenly feels like the start of a quest",
+			"an errand becomes the first step of a journey",
+			"a tiny discovery points toward a bigger adventure",
+			"the hero notices a path no one mentioned before",
+		},
+		moods: []string{"excited and curious", "fresh and adventurous", "hopeful and brave", "playful and daring"},
+	},
+	"fantasi": {
+		places: []string{
+			"a lantern-lit garden where leaves shimmer like tiny stars",
+			"a moon-pale clearing beside a whispering crystal pond",
+			"a cloud-soft meadow behind a silver gate",
+			"a floating bridge over glowing mist",
+			"a secret grove where flowers hum in the breeze",
+		},
+		features: []string{
+			"a pebble glowing in rainbow colors",
+			"a sleeping mushroom ring with silver dust",
+			"a tiny winged creature hiding in the petals",
+			"a ribbon of light circling an old stump",
+			"a bell-shaped flower opening by itself",
+		},
+		actions: []string{
+			"magic peeks into an ordinary afternoon",
+			"the hero notices a strange wonder no one else has seen",
+			"a small fantasy clue asks to be followed",
+			"the world feels kind but quietly enchanted",
+			"something impossible appears in a gentle way",
+		},
+		moods: []string{"warm and magical", "gentle and sparkling", "dreamy and safe", "wonder-filled and bright"},
+	},
+	"cerita haiwan": {
+		places: []string{
+			"a sunny burrow village under a hibiscus hedge",
+			"a shady pond path lined with cattails",
+			"a cozy treetop nook above a sleepy lane",
+			"a grassy field beside a duck-filled stream",
+			"a small barn corner with warm hay and birdsong",
+		},
+		features: []string{
+			"a tiny scarf caught on a twig",
+			"a basket of berries tipped on the ground",
+			"a trail of shiny seeds",
+			"a wobbling acorn cart",
+			"a small bell ringing from behind the reeds",
+		},
+		actions: []string{
+			"an animal friend needs a little help",
+			"the animals notice a problem that only teamwork can solve",
+			"a playful misunderstanding starts the story",
+			"a gentle mystery appears among the creatures",
+			"a kind animal spots something unusual nearby",
+		},
+		moods: []string{"cozy and friendly", "gentle and playful", "caring and curious", "warm and cheerful"},
+	},
+	"kisah dongeng": {
+		places: []string{
+			"a small kingdom road beside a golden wheat field",
+			"a cottage edge near a moonlit well",
+			"a castle garden behind an ivy-covered wall",
+			"a winding lane leading to a tall old tower",
+			"a forest path beside a ribbon-blue brook",
+		},
+		features: []string{
+			"a silver key wrapped in cloth",
+			"a talking bird feather on the path",
+			"a locked box no one remembers",
+			"a spinning wheel thread caught on a rose bush",
+			"a tiny crown charm hidden in the grass",
+		},
+		actions: []string{
+			"a simple day begins to feel like a true fairy tale",
+			"the hero discovers a gentle sign of old magic",
+			"a mysterious object hints at a classic quest",
+			"someone kind is called toward a royal secret",
+			"an old tale suddenly feels real",
+		},
+		moods: []string{"timeless and magical", "soft and wondrous", "classic and hopeful", "gentle and enchanted"},
+	},
+	"keluarga": {
+		places: []string{
+			"a busy kitchen filled with afternoon light",
+			"a wooden veranda beside potted plants and slippers",
+			"a family courtyard after a light rain",
+			"a living room with folded blankets and old photo frames",
+			"a backyard where clothes sway on a line",
+		},
+		features: []string{
+			"an old tin box under a chair",
+			"a missing recipe page",
+			"a small parcel tied with string",
+			"a framed photo turned face down",
+			"a familiar song humming from another room",
+		},
+		actions: []string{
+			"a family errand turns meaningful",
+			"a small household problem brings everyone together",
+			"the hero notices something important about home",
+			"an ordinary family moment opens a gentle mystery",
+			"a simple discovery reveals a warm memory",
+		},
+		moods: []string{"warm and homely", "loving and gentle", "nostalgic and safe", "soft and caring"},
+	},
+	"kelakar": {
+		places: []string{
+			"a school canteen corner during a breezy break",
+			"a backyard with buckets, slippers, and wobbling stools",
+			"a market lane full of funny sounds",
+			"a playground edge near a squeaky swing",
+			"a kitchen where something keeps clattering",
+		},
+		features: []string{
+			"a hat stuck in the wrong place",
+			"a very bouncy parcel",
+			"a squeaking toy no one can catch",
+			"a tray that slides a little too far",
+			"a suspiciously wiggly basket",
+		},
+		actions: []string{
+			"a silly misunderstanding starts a chain of laughs",
+			"something ordinary goes comically wrong",
+			"the hero notices a funny problem that keeps growing",
+			"a tiny mistake turns into playful chaos",
+			"everyone tries to stay serious, but cannot",
+		},
+		moods: []string{"light and goofy", "playful and funny", "cheerful and silly", "bouncy and bright"},
+	},
+	"persahabatan": {
+		places: []string{
+			"a school field after the morning bell",
+			"a shaded bench near a mural wall",
+			"a library reading corner with soft sunlight",
+			"a small bridge in the park between two paths",
+			"a craft table beside open classroom windows",
+		},
+		features: []string{
+			"a shared notebook left behind",
+			"a bracelet bead rolled under a bench",
+			"a half-finished drawing with two names on it",
+			"a friendship ribbon caught on a bag zipper",
+			"a paper star folded by a classmate",
+		},
+		actions: []string{
+			"two friends notice a problem they can solve together",
+			"a small misunderstanding asks for kindness",
+			"a quiet moment becomes the start of teamwork",
+			"one child realizes a friend needs help",
+			"a shared discovery deepens a friendship",
+		},
+		moods: []string{"warm and trusting", "gentle and cooperative", "kind and uplifting", "friendly and hopeful"},
+	},
+	"inspirasi": {
+		places: []string{
+			"a sunrise field beside a small village track",
+			"a simple classroom before the others arrive",
+			"a workshop corner with tools and paper plans",
+			"a community garden beside a narrow path",
+			"a quiet practice space under a broad tree",
+		},
+		features: []string{
+			"a list of goals with one blank space",
+			"a small broken item waiting to be repaired",
+			"a handmade badge tucked in a pocket",
+			"a seedling that needs extra care",
+			"a note of encouragement from someone older",
+		},
+		actions: []string{
+			"the hero faces a challenge that asks for patience",
+			"a small chance to do the right thing appears",
+			"effort and kindness begin in an ordinary moment",
+			"the day offers a chance to be brave in a quiet way",
+			"a simple responsibility turns meaningful",
+		},
+		moods: []string{"hopeful and uplifting", "steady and brave", "gentle and motivating", "bright and encouraging"},
+	},
+	"sains & teknologi": {
+		places: []string{
+			"a tidy science corner with jars and labeled boxes",
+			"a school lab table near an open window",
+			"a small robot workshop in the back room",
+			"a rooftop lookout with a homemade weather station",
+			"a garden path beside a row of curious gadgets",
+		},
+		features: []string{
+			"a blinking sensor with one loose wire",
+			"a notebook full of neat sketches",
+			"a tiny solar toy that suddenly stops",
+			"a model bridge waiting to be tested",
+			"a curious magnet pulling the wrong object",
+		},
+		actions: []string{
+			"a question leads to a hands-on discovery",
+			"the hero notices something that does not behave as expected",
+			"a simple experiment begins with a surprise",
+			"a small invention asks to be understood",
+			"a problem invites careful thinking and testing",
+		},
+		moods: []string{"curious and clever", "bright and inventive", "playful and thoughtful", "focused and exciting"},
+	},
+	"mistik/misteri": {
+		places: []string{
+			"a quiet veranda at dusk beside a darkening yard",
+			"a narrow lane near an old locked storeroom",
+			"a misty riverside path under swaying bamboo",
+			"a sleepy village corner after the evening call to prayer",
+			"a dim garden path where lantern light barely reaches",
+		},
+		features: []string{
+			"a smooth stone wrapped in faded cloth",
+			"a shadow moving where no one stands",
+			"a note with half the words missing",
+			"a small charm hanging from a nail",
+			"a strange sound coming from behind a wooden wall",
+		},
+		actions: []string{
+			"a quiet mystery appears in an ordinary place",
+			"the hero notices something that should not be there",
+			"an elder's warning turns a normal evening strange",
+			"a tiny clue makes the air feel different",
+			"something familiar suddenly carries a secret",
+		},
+		moods: []string{"calm but mysterious", "gentle and suspenseful", "quiet and curious", "softly eerie but safe"},
+	},
+}
+
+func kidsSettingSeed(genre, seed string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.ToLower(strings.TrimSpace(genre)) + "::" + strings.TrimSpace(seed)))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
 // FormatAsLightNovel returns any extra prompt text that forces light-novel style.

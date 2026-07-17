@@ -5,8 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -166,6 +172,7 @@ func writeImageResponse(w http.ResponseWriter, r *http.Request, client *http.Cli
 		if err != nil {
 			return errors.New("failed to read image bytes")
 		}
+		imageBytes, contentType = normalizeKidsStoryImage(imageBytes, contentType)
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 		_, _ = w.Write(imageBytes)
@@ -197,7 +204,8 @@ func writeImageResponse(w http.ResponseWriter, r *http.Request, client *http.Cli
 		if err != nil {
 			return errors.New("failed to decode image data")
 		}
-		w.Header().Set("Content-Type", "image/jpeg")
+		imageBytes, contentType = normalizeKidsStoryImage(imageBytes, "image/jpeg")
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 		_, _ = w.Write(imageBytes)
 		return nil
@@ -236,6 +244,7 @@ func proxyRemoteImage(w http.ResponseWriter, r *http.Request, client *http.Clien
 	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
 		contentType = "image/jpeg"
 	}
+	imageBytes, contentType = normalizeKidsStoryImage(imageBytes, contentType)
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	_, _ = w.Write(imageBytes)
@@ -262,6 +271,161 @@ func resolveImageURL(providerBase, imageURL string) (string, error) {
 
 func min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func normalizeKidsStoryImage(imageBytes []byte, contentType string) ([]byte, string) {
+	img, format, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return imageBytes, contentType
+	}
+
+	rect, ok := detectLargestPanelRect(img)
+	if !ok {
+		return imageBytes, contentType
+	}
+
+	cropped := cropImage(img, rect)
+	var out bytes.Buffer
+	switch strings.ToLower(format) {
+	case "png":
+		if err := png.Encode(&out, cropped); err != nil {
+			return imageBytes, contentType
+		}
+		slog.Info("kids_image_panel_crop_applied", "format", format, "width", rect.Dx(), "height", rect.Dy())
+		return out.Bytes(), "image/png"
+	default:
+		if err := jpeg.Encode(&out, cropped, &jpeg.Options{Quality: 92}); err != nil {
+			return imageBytes, contentType
+		}
+		slog.Info("kids_image_panel_crop_applied", "format", format, "width", rect.Dx(), "height", rect.Dy())
+		return out.Bytes(), "image/jpeg"
+	}
+}
+
+type axisSpan struct {
+	start int
+	end   int
+}
+
+func detectLargestPanelRect(img image.Image) (image.Rectangle, bool) {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width < 240 || height < 240 {
+		return image.Rectangle{}, false
+	}
+
+	colGutters := detectColumnGutters(img, bounds)
+	rowGutters := detectRowGutters(img, bounds)
+	xSpans := nonGutterSpans(colGutters, max(60, width/8))
+	ySpans := nonGutterSpans(rowGutters, max(60, height/8))
+	if len(xSpans) < 2 || len(ySpans) < 2 {
+		return image.Rectangle{}, false
+	}
+
+	imgCenterX := float64(bounds.Min.X + width/2)
+	imgCenterY := float64(bounds.Min.Y + height/2)
+	bestScore := -1
+	bestDist := math.MaxFloat64
+	bestRect := image.Rectangle{}
+
+	for _, xs := range xSpans {
+		for _, ys := range ySpans {
+			rect := image.Rect(bounds.Min.X+xs.start, bounds.Min.Y+ys.start, bounds.Min.X+xs.end, bounds.Min.Y+ys.end)
+			if rect.Dx() < max(60, width/8) || rect.Dy() < max(60, height/8) {
+				continue
+			}
+			area := rect.Dx() * rect.Dy()
+			centerX := float64(rect.Min.X+rect.Max.X) / 2
+			centerY := float64(rect.Min.Y+rect.Max.Y) / 2
+			dist := math.Pow(centerX-imgCenterX, 2) + math.Pow(centerY-imgCenterY, 2)
+			if area > bestScore || (area == bestScore && dist < bestDist) {
+				bestScore = area
+				bestDist = dist
+				bestRect = rect
+			}
+		}
+	}
+
+	if bestScore <= 0 || bestRect.Empty() {
+		return image.Rectangle{}, false
+	}
+	if bestRect.Dx()*bestRect.Dy() >= (width*height*92)/100 {
+		return image.Rectangle{}, false
+	}
+	return bestRect, true
+}
+
+func detectColumnGutters(img image.Image, bounds image.Rectangle) []bool {
+	width := bounds.Dx()
+	height := bounds.Dy()
+	gutters := make([]bool, width)
+	required := int(float64(height) * 0.94)
+	for x := 0; x < width; x++ {
+		whiteCount := 0
+		for y := 0; y < height; y++ {
+			if isNearWhite(img.At(bounds.Min.X+x, bounds.Min.Y+y)) {
+				whiteCount++
+			}
+		}
+		gutters[x] = whiteCount >= required
+	}
+	return gutters
+}
+
+func detectRowGutters(img image.Image, bounds image.Rectangle) []bool {
+	width := bounds.Dx()
+	height := bounds.Dy()
+	gutters := make([]bool, height)
+	required := int(float64(width) * 0.94)
+	for y := 0; y < height; y++ {
+		whiteCount := 0
+		for x := 0; x < width; x++ {
+			if isNearWhite(img.At(bounds.Min.X+x, bounds.Min.Y+y)) {
+				whiteCount++
+			}
+		}
+		gutters[y] = whiteCount >= required
+	}
+	return gutters
+}
+
+func nonGutterSpans(gutters []bool, minSpan int) []axisSpan {
+	var spans []axisSpan
+	start := -1
+	for i, isGutter := range gutters {
+		if !isGutter && start == -1 {
+			start = i
+		}
+		if isGutter && start != -1 {
+			if i-start >= minSpan {
+				spans = append(spans, axisSpan{start: start, end: i})
+			}
+			start = -1
+		}
+	}
+	if start != -1 && len(gutters)-start >= minSpan {
+		spans = append(spans, axisSpan{start: start, end: len(gutters)})
+	}
+	return spans
+}
+
+func isNearWhite(c color.Color) bool {
+	r, g, b, _ := c.RGBA()
+	return r>>8 >= 242 && g>>8 >= 242 && b>>8 >= 242
+}
+
+func cropImage(src image.Image, rect image.Rectangle) image.Image {
+	dst := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	draw.Draw(dst, dst.Bounds(), src, rect.Min, draw.Src)
+	return dst
+}
+
+func max(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b

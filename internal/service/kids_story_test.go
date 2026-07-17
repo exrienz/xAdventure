@@ -174,7 +174,7 @@ func TestKidsImagePromptUsesCharacterAppearanceNotFullStoryDump(t *testing.T) {
 	}
 
 	prompt := BuildKidsImagePrompt(imageScene, visualSetting, entities, "Fantasi", 4)
-	for _, want := range []string{"long dark hair", "pink shirt", "blue skirt", "yellow butterfly hair clip", "small orange kitten", "Story setting:", "mango tree", "Current page scene:", "single full-page illustration", "No split panels"} {
+	for _, want := range []string{"long dark hair", "pink shirt", "blue skirt", "yellow butterfly hair clip", "small orange kitten", "Setting:", "mango tree", "Scene:", "A single full-bleed children's watercolor illustration", "One camera angle", "One continuous environment", "Depict one freeze-frame moment in time", "Maintain consistent character designs and environment"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing visual detail %q:\n%s", want, prompt)
 		}
@@ -183,6 +183,19 @@ func TestKidsImagePromptUsesCharacterAppearanceNotFullStoryDump(t *testing.T) {
 	for _, bad := range []string{"bermain", "mengejar", "rama-rama", "ketakutan"} {
 		if strings.Contains(prompt, bad) {
 			t.Fatalf("prompt contains Malay text %q:\n%s", bad, prompt)
+		}
+	}
+}
+
+func TestKidsSingleMomentSceneKeepsOnlyFirstVisualBeat(t *testing.T) {
+	scene := "A girl kneels in the grass beside a bench and looks under it. Then her friend points toward a shiny object near the tree. Warm afternoon light."
+	got := kidsSingleMomentScene(scene)
+	if !strings.Contains(got, "kneels in the grass") {
+		t.Fatalf("expected first moment to remain, got %q", got)
+	}
+	for _, bad := range []string{"Then her friend points", "shiny object near the tree"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("expected later beat %q to be removed, got %q", bad, got)
 		}
 	}
 }

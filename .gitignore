@@ -25,3 +25,6 @@ secrets/
 
 # Test artifacts
 internal/repository/test_*.db
+
+# Hot reload / local build artifacts
+tmp/
