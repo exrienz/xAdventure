@@ -22,6 +22,16 @@ func TestKidsStyleRulesIncludesStrictBahasaMalaysiaAndAgeBounds(t *testing.T) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
+	for _, want := range []string{
+		"ONE clear central problem",
+		"keep the whole story focused on solving that SAME problem",
+		"Do NOT replace the main problem",
+		"Every choice must be a sensible next action",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing story-focus rule %q:\n%s", want, prompt)
+		}
+	}
 }
 
 func TestCountWordsStripsHTML(t *testing.T) {
@@ -131,6 +141,14 @@ func TestKidsPageInstructionBuildsNaturalOpeningAndEnding(t *testing.T) {
 	for _, want := range []string{"PAGE 6 OF 10", "may end naturally", "story_complete", "Do NOT save the ending for page 10"} {
 		if !strings.Contains(earliestEnding, want) {
 			t.Fatalf("page 6 instruction missing %q:\n%s", want, earliestEnding)
+		}
+	}
+	if strings.Contains(earliestEnding, "creates a new problem") {
+		t.Fatalf("page 6 should not introduce a replacement problem:\n%s", earliestEnding)
+	}
+	for _, want := range []string{"same main problem", "without starting a new problem"} {
+		if !strings.Contains(earliestEnding, want) {
+			t.Fatalf("page 6 instruction missing focus rule %q:\n%s", want, earliestEnding)
 		}
 	}
 }

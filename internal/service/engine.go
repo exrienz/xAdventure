@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"strings"
 	"sync"
@@ -27,6 +28,11 @@ type Engine struct {
 	cfg           *config.Config
 	mu            sync.RWMutex
 	sessionMu     map[string]*sync.Mutex
+}
+
+type kidsCharacterProfile struct {
+	Appearance string
+	Traits     []string
 }
 
 func NewEngine(repo repository.Repository, llmClient *llm.Client, kidsLLMClient *llm.Client, cfg *config.Config) *Engine {
@@ -152,19 +158,22 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 			Archetype:     archetype,
 			PlotTwists:    0,
 			ChapterNumber: 1,
-			Entities: map[string]domain.Entity{
-				strings.ToLower(userName): {
-					Name:         userName,
-					RelationToPC: "main character",
-					Gender:       sanitize(req.Gender),
-					Role:         "protagonist",
-					Status:       "active",
-					Appearance:   defaultKidsAppearance(userName, sanitize(req.Gender)),
-					Traits:       []string{"curious", "kind", "brave"},
-				},
-			},
+			Entities:      map[string]domain.Entity{},
 		},
 	}
+	protagonistEntity := domain.Entity{
+		Name:         userName,
+		RelationToPC: "main character",
+		Gender:       session.Gender,
+		Role:         "protagonist",
+		Status:       "active",
+	}
+	if domain.IsKidsGenre(session.Genre) {
+		protagonistProfile := defaultKidsProfile(userName, session.Gender, session.Genre, seed)
+		protagonistEntity.Appearance = protagonistProfile.Appearance
+		protagonistEntity.Traits = protagonistProfile.Traits
+	}
+	session.State.Entities[strings.ToLower(userName)] = protagonistEntity
 
 	if err := e.repo.CreateSession(ctx, session); err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create session: %w", err)
@@ -187,11 +196,13 @@ func (e *Engine) StartSession(ctx context.Context, req *domain.StartRequest) (*d
 	pageInstruction := ""
 	characterModeInstruction := ""
 	settingVarietyInstruction := ""
+	storyFlowInstruction := ""
 	if domain.IsKidsGenre(req.Genre) {
-		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. Create a consistent main character profile and 1-2 supporting side character profiles using state_update.add_entities. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also set state_update.visual_setting to a concise ENGLISH reusable background profile for this story world, covering the place, lighting, important props, and atmosphere. Keep that visual setting stable across later pages unless the story truly moves to a new place. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels. Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
+		languageInstruction = "Language instruction: write every word in standard Bahasa Malaysia only. Do not use Indonesian vocabulary, slang, or syntax. The protagonist profile is already provided in Current State. Reuse that exact protagonist appearance and core traits for this story. Do not replace the protagonist with a different generic child design. Create 1-2 supporting side character profiles using state_update.add_entities when needed. For every character, set appearance with stable visual details: hair length/style, shirt/top color, trousers/skirt, shoes, and any distinctive accessory. IMPORTANT: write all appearance values in ENGLISH (visual description only, no story text). Reuse the same appearance exactly when characters reappear. Also set state_update.visual_setting to a concise ENGLISH reusable background profile for this story world, covering the place, lighting, important props, and atmosphere. Keep that visual setting stable across later pages unless the story truly moves to a new place. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels. Example: \"A young girl with shoulder-length dark hair, yellow shirt, and blue skirt kneels beside a small brown bird on a green school field. Morning sunlight. Cheerful mood.\""
 		pageInstruction = KidsPageInstruction(1, session.Age)
 		characterModeInstruction = kidsCharacterModeInstruction(session.UserName, session.Gender)
 		settingVarietyInstruction = fmt.Sprintf("Setting variety instruction: use this fresh genre-fitting opening spark as inspiration and make the place feel specific, concrete, and new: %s Avoid defaulting to generic parks, flower gardens, plain village houses, or random forests unless the spark or story logic clearly points there.", kidsSettingSpark)
+		storyFlowInstruction = kidsStoryFlowInstruction(1, nil)
 	}
 
 	userMsg := fmt.Sprintf(`Begin a new serialized light novel.
@@ -200,6 +211,7 @@ Archetype: %s (%s).
 Genre: %s (%s).
 Story seed: %s.
 Opening style: %s
+%s
 %s
 %s
 %s
@@ -218,6 +230,7 @@ Current State: %s`,
 		pageInstruction,
 		characterModeInstruction,
 		settingVarietyInstruction,
+		storyFlowInstruction,
 		stateJSON(session.State),
 	)
 
@@ -309,14 +322,19 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 
 	turnNumber := len(logs) + 1
 
-	twistLevel, twistInstruction := e.twistEngine.RollTwist(turnNumber, session.State.PlotTwists, session.Genre)
 	twistPrefix := ""
-	if twistLevel != domain.TwistNone {
-		twistPrefix = fmt.Sprintf("Plot twist directive: %s\n\n", twistInstruction)
-		session.State.PlotTwists++
+	if !domain.IsKidsGenre(session.Genre) {
+		twistLevel, twistInstruction := e.twistEngine.RollTwist(turnNumber, session.State.PlotTwists, session.Genre)
+		if twistLevel != domain.TwistNone {
+			twistPrefix = fmt.Sprintf("Plot twist directive: %s\n\n", twistInstruction)
+			session.State.PlotTwists++
+		}
 	}
 
 	spontaneousTwist := "You are also free to introduce your own surprising beat, reversal, or revelation whenever it serves the drama."
+	if domain.IsKidsGenre(session.Genre) {
+		spontaneousTwist = "Do NOT introduce unrelated twists, random detours, or a second main quest. Any surprise must directly help, delay, clarify, or solve the same main problem."
+	}
 
 	enhanced := e.cfg.FeatureEnabled("enhanced_narrative_logic")
 	systemPrompt := e.getSystemPrompt(session.Genre, session.Archetype, session.Age, enhanced)
@@ -361,21 +379,27 @@ func (e *Engine) ProcessTurn(ctx context.Context, sessionID string, choiceIndex 
 
 	languageInstruction := ""
 	characterModeInstruction := ""
+	storyFlowInstruction := ""
 	if domain.IsKidsGenre(session.Genre) {
-		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Reuse the Known Visual Setting exactly when the story is still in the same place. Only change state_update.visual_setting when the story genuinely moves to a new location, and then describe the new stable setting in concise ENGLISH. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels."
+		languageInstruction = "Language instruction: continue in standard Bahasa Malaysia only. Do NOT use Indonesian vocabulary, slang, or syntax. If you accidentally use an Indonesian word, replace it with the Malaysian equivalent immediately. Reuse Known Characters exactly: keep each character name, appearance, role, and traits consistent. Never redesign the protagonist after page 1. If a new side character appears, add a complete reusable profile in state_update.add_entities. IMPORTANT: write all appearance values in ENGLISH (visual description only). Reuse the Known Visual Setting exactly when the story is still in the same place. Only change state_update.visual_setting when the story genuinely moves to a new location, and then describe the new stable setting in concise ENGLISH. Also provide image_scene: one concise ENGLISH visual description of exactly one frozen moment from this page only. Describe one situation only, not a sequence, not before-and-after actions, and not multiple panels."
 		characterModeInstruction = kidsCharacterModeInstruction(session.UserName, session.Gender)
+		storyFlowInstruction = kidsStoryFlowInstruction(turnNumber, session.State.Flags)
 	} else {
 		languageInstruction = "Use simple, clear English with short sentences."
 	}
+
+	mainGoal := mainGoalSummary(session.State.Flags)
 
 	userMsg := fmt.Sprintf(`%sI choose: %s
 
 Current State: %s
 Active Flags: %s
+Main Story Goal: %s
 Known Characters: %s
 Known Visual Setting: %s
 
 Continue the story from this choice. %s Advance the plot, reveal character, escalate tension appropriately for the selected genre and age. %s
+%s
 %s
 %s
 %s
@@ -386,6 +410,7 @@ Do NOT contradict the known characters or their relationships listed above.`,
 		selectedChoiceText,
 		stateJSON(session.State),
 		strings.Join(session.State.Flags, ", "),
+		mainGoal,
 		entitySummary,
 		e.visualSettingSummary(session.State.VisualSetting),
 		languageInstruction,
@@ -393,6 +418,7 @@ Do NOT contradict the known characters or their relationships listed above.`,
 		chapterInstruction,
 		arcInstruction,
 		characterModeInstruction,
+		storyFlowInstruction,
 	)
 	messages = append(messages, llm.Message{Role: "user", Content: userMsg})
 
@@ -586,6 +612,9 @@ func (e *Engine) entitySummary(entities map[string]domain.Entity) string {
 		if ent.Appearance != "" {
 			desc += fmt.Sprintf(", appearance: %s", ent.Appearance)
 		}
+		if len(ent.Traits) > 0 {
+			desc += fmt.Sprintf(", traits: %s", strings.Join(ent.Traits, ", "))
+		}
 		parts = append(parts, desc)
 	}
 	return strings.Join(parts, "; ")
@@ -757,14 +786,46 @@ func (e *Engine) logMetrics(genre, text string, entities map[string]domain.Entit
 	)
 }
 
-func defaultKidsAppearance(name, gender string) string {
+func defaultKidsProfile(name, gender, genre, seed string) kidsCharacterProfile {
 	if strings.EqualFold(gender, "Watak") {
-		return knownKidsCharacterAppearance(name)
+		return kidsCharacterProfile{
+			Appearance: knownKidsCharacterAppearance(name),
+			Traits:     []string{"ikonik", "mudah dikenali", "ceria"},
+		}
 	}
+	return randomKidsProfile(gender, genre, seed, name)
+}
+
+func randomKidsProfile(gender, genre, seed, name string) kidsCharacterProfile {
+	baseSeed := strings.ToLower(strings.TrimSpace(seed + "|" + name + "|" + gender + "|" + genre))
+	subject := "young Malaysian boy"
+	hairStyles := []string{"short slightly wavy dark hair", "neatly combed dark hair", "short tousled dark brown hair", "soft straight black hair with a side part", "short layered dark hair"}
+	tops := []string{"sky-blue short-sleeve shirt", "green striped T-shirt", "orange collared shirt", "teal T-shirt with white trim", "mustard long-sleeve top"}
+	bottoms := []string{"navy shorts", "brown shorts", "olive trousers", "blue jogger pants", "khaki shorts"}
+	shoes := []string{"white sneakers", "green canvas shoes", "brown sandals", "blue slip-on shoes", "red trainers"}
+	accessories := kidsGenreAccessories(genre, false)
 	if strings.EqualFold(gender, "Perempuan") {
-		return "young Malaysian girl with shoulder-length dark hair, yellow short-sleeve shirt, blue skirt, white socks, red shoes"
+		subject = "young Malaysian girl"
+		hairStyles = []string{"shoulder-length dark hair", "long black hair in a braid", "chin-length dark bob hair", "wavy dark brown hair tied in a ponytail", "long straight black hair with a side clip"}
+		tops = []string{"yellow short-sleeve blouse", "mint green T-shirt", "pink long-sleeve top", "turquoise tunic top", "peach collared shirt"}
+		bottoms = []string{"blue skirt", "purple trousers", "navy culottes", "teal leggings", "brown skirt"}
+		shoes = []string{"white shoes", "red sneakers", "pink sandals", "blue canvas shoes", "yellow slip-on shoes"}
+		accessories = kidsGenreAccessories(genre, true)
 	}
-	return "young Malaysian boy with short dark hair, blue short-sleeve shirt, brown shorts, white socks, green shoes"
+
+	appearance := fmt.Sprintf("%s with %s, %s, %s, %s, and %s",
+		subject,
+		pickSeeded(baseSeed, "hair", hairStyles),
+		pickSeeded(baseSeed, "top", tops),
+		pickSeeded(baseSeed, "bottom", bottoms),
+		pickSeeded(baseSeed, "shoes", shoes),
+		pickSeeded(baseSeed, "accessory", accessories),
+	)
+
+	return kidsCharacterProfile{
+		Appearance: appearance,
+		Traits:     pickDistinctSeeded(baseSeed, kidsGenreTraits(genre), 3),
+	}
 }
 
 func kidsCharacterModeInstruction(name, gender string) string {
@@ -813,6 +874,154 @@ func normalizedCharacterKey(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	replacer := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "", "'", "", "\"", "", ",", "", ":", "", ";", "", "/", "", "\\", "")
 	return replacer.Replace(name)
+}
+
+func mainGoalSummary(flags []string) string {
+	for _, flag := range flags {
+		raw := strings.TrimSpace(flag)
+		lower := strings.ToLower(raw)
+		if !strings.HasPrefix(lower, "main_goal:") {
+			continue
+		}
+		goal := strings.TrimSpace(raw[len("main_goal:"):])
+		if goal != "" {
+			return goal
+		}
+	}
+	return "None yet."
+}
+
+func kidsStoryFlowInstruction(turnNumber int, flags []string) string {
+	goal := mainGoalSummary(flags)
+	if turnNumber <= 1 || goal == "None yet." {
+		return "Story flow rule: establish exactly one clear central problem, need, or goal for this story. Save it in state_update.add_flags as main_goal:<short ENGLISH phrase>. Once set, keep every later page and every choice focused on solving that same main goal. Do NOT replace it with a new unrelated mission, mystery, character problem, or magical object quest."
+	}
+	return fmt.Sprintf("Story flow rule: keep the same main goal from start to finish. Current main goal: %s. Every scene beat, obstacle, helper, discovery, and choice must directly progress, delay, clarify, or solve this same goal. Do NOT invent a second main problem. Do NOT wander into unrelated subplots. If a new detail appears, it must matter because of this main goal.", goal)
+}
+
+func kidsGenreAccessories(genre string, female bool) []string {
+	switch strings.ToLower(strings.TrimSpace(genre)) {
+	case "pengembaraan":
+		if female {
+			return []string{"a small compass bracelet", "a tiny explorer satchel", "a leaf-pattern backpack", "a bright scarf"}
+		}
+		return []string{"a small compass bracelet", "a tiny explorer satchel", "a striped backpack", "a bright scarf"}
+	case "fantasi":
+		if female {
+			return []string{"a moon-shaped hair clip", "a star pendant", "a ribbon with tiny bells", "a sparkly satchel"}
+		}
+		return []string{"a moon-shaped pin", "a star pendant", "a tiny capelet", "a sparkly satchel"}
+	case "cerita haiwan":
+		if female {
+			return []string{"an animal-shaped hair clip", "a paw-print sling bag", "a flower bracelet", "a small bird badge"}
+		}
+		return []string{"an animal-shaped badge", "a paw-print sling bag", "a flower bracelet", "a small bird badge"}
+	case "kisah dongeng":
+		if female {
+			return []string{"a ribbon headband", "a pearl brooch", "a lace satchel", "a little silver charm"}
+		}
+		return []string{"a ribbon scarf", "a polished brooch", "a little silver charm", "a storybook satchel"}
+	case "keluarga":
+		if female {
+			return []string{"a family photo locket", "a crocheted bracelet", "a polka-dot backpack", "a simple ribbon clip"}
+		}
+		return []string{"a family photo locket", "a woven bracelet", "a checked backpack", "a small cap"}
+	case "kelakar":
+		if female {
+			return []string{"a bright rainbow headband", "a funny fruit-shaped clip", "a colorful pouch", "a squeaky charm bracelet"}
+		}
+		return []string{"a bright rainbow cap", "a funny fruit-shaped badge", "a colorful pouch", "a squeaky charm bracelet"}
+	case "persahabatan":
+		if female {
+			return []string{"a friendship bracelet", "a heart-shaped hair clip", "a matching mini backpack", "a daisy pin"}
+		}
+		return []string{"a friendship bracelet", "a star badge", "a matching mini backpack", "a daisy pin"}
+	case "inspirasi":
+		if female {
+			return []string{"a neat notebook pouch", "a medal-shaped pin", "a tidy ribbon clip", "a little charm watch"}
+		}
+		return []string{"a neat notebook pouch", "a medal-shaped pin", "a tidy cap", "a little charm watch"}
+	case "sains & teknologi":
+		if female {
+			return []string{"a simple gadget watch", "a tiny tool pouch", "a light-up hair clip", "a circuit-pattern backpack"}
+		}
+		return []string{"a simple gadget watch", "a tiny tool pouch", "a light-up badge", "a circuit-pattern backpack"}
+	case "mistik/misteri":
+		if female {
+			return []string{"a tiny flashlight clipped to the bag", "a magnifying-glass charm", "a dark blue ribbon clip", "a secret-pocket satchel"}
+		}
+		return []string{"a tiny flashlight clipped to the shirt", "a magnifying-glass charm", "a dark blue scarf", "a secret-pocket satchel"}
+	default:
+		if female {
+			return []string{"a bright hair clip", "a small backpack", "a simple bracelet", "a tiny pendant"}
+		}
+		return []string{"a bright cap", "a small backpack", "a simple bracelet", "a tiny pendant"}
+	}
+}
+
+func kidsGenreTraits(genre string) []string {
+	switch strings.ToLower(strings.TrimSpace(genre)) {
+	case "pengembaraan":
+		return []string{"curious", "bold", "energetic", "helpful", "observant", "hopeful"}
+	case "fantasi":
+		return []string{"imaginative", "curious", "brave", "gentle", "wonder-filled", "kind"}
+	case "cerita haiwan":
+		return []string{"gentle", "caring", "patient", "playful", "kind", "observant"}
+	case "kisah dongeng":
+		return []string{"polite", "hopeful", "clever", "kind", "brave", "graceful"}
+	case "keluarga":
+		return []string{"loving", "helpful", "responsible", "warm", "patient", "thoughtful"}
+	case "kelakar":
+		return []string{"cheerful", "playful", "quick-thinking", "goofy", "friendly", "bold"}
+	case "persahabatan":
+		return []string{"loyal", "friendly", "thoughtful", "forgiving", "kind", "patient"}
+	case "inspirasi":
+		return []string{"determined", "humble", "diligent", "resilient", "hopeful", "kind"}
+	case "sains & teknologi":
+		return []string{"inventive", "observant", "careful", "curious", "patient", "clever"}
+	case "mistik/misteri":
+		return []string{"observant", "careful", "brave", "clever", "calm", "curious"}
+	default:
+		return []string{"curious", "kind", "brave", "helpful", "gentle", "thoughtful"}
+	}
+}
+
+func pickSeeded(seed, salt string, values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[seededIndex(seed, salt, len(values))]
+}
+
+func pickDistinctSeeded(seed string, values []string, count int) []string {
+	if count <= 0 || len(values) == 0 {
+		return nil
+	}
+	if count > len(values) {
+		count = len(values)
+	}
+	picked := make([]string, 0, count)
+	used := make(map[int]bool)
+	for i := 0; len(picked) < count && i < len(values)*2; i++ {
+		idx := seededIndex(seed, fmt.Sprintf("trait-%d", i), len(values))
+		if used[idx] {
+			continue
+		}
+		used[idx] = true
+		picked = append(picked, values[idx])
+	}
+	return picked
+}
+
+func seededIndex(seed, salt string, size int) int {
+	if size <= 1 {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(seed))
+	_, _ = h.Write([]byte("::"))
+	_, _ = h.Write([]byte(salt))
+	return int(h.Sum64() % uint64(size))
 }
 
 func stateJSON(state domain.GameState) string {

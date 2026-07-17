@@ -56,6 +56,12 @@ func KidsStyleRules(genre string, age int, dynamicKidsEnabled bool) string {
 - NO large walls of text or complex paragraphs.
 - Every page must feel like the next natural step. Never start like the story is already halfway through a crisis.
 - Cover only ONE clear micro-beat per page so the story grows gradually and smoothly.
+- Establish exactly ONE clear central problem, need, or goal for the story.
+- After that central problem appears, keep the whole story focused on solving that SAME problem.
+- Do NOT replace the main problem with a new unrelated mission, mystery, villain, object, or side quest.
+- Obstacles may delay the solution, but they must make the SAME main problem harder rather than starting a different story.
+- Every choice must be a sensible next action toward understanding, handling, or solving the SAME main problem.
+- Do NOT give random, silly, bait, or unrelated choices that drag the story away from its core issue.
 - The story must last at least 6 pages and at most 10 pages.
 - End each non-final page with a simple, age-appropriate hook or question.
 - If the story reaches a full, satisfying ending on page 6, 7, 8, or 9, you may finish naturally there.
@@ -241,7 +247,7 @@ func kidsArcOverview() string {
 		"Page 3: the protagonist takes the first real step",
 		"Page 4: an early obstacle or surprise slows them down",
 		"Page 5: they learn, find, or realize something useful",
-		"Page 6: a setback or mistake creates a new problem; from here the story may end naturally once the main problem is fully solved",
+		"Page 6: a setback or mistake makes the same main problem harder; from here the story may end naturally once that main problem is fully solved",
 		"Page 7: the protagonist tries again with more courage or teamwork",
 		"Page 8: the biggest child-safe obstacle appears before the ending",
 		"Page 9: the solution begins and the main problem starts to unlock",
@@ -258,25 +264,25 @@ func KidsPageInstruction(turnNumber, age int) string {
 	case 1:
 		return common + " Start at the true beginning. Introduce the protagonist, the place, and one small want or activity. Do NOT begin in the middle of danger, chaos, or a half-finished adventure. End with a tiny clue or invitation."
 	case 2:
-		return common + " Show the first clue, invitation, or gentle problem. Let the protagonist notice it and care about it."
+		return common + " Show the first clue, invitation, or gentle problem. Let the protagonist notice it and care about it. Make this the same main problem the whole story will solve."
 	case 3:
-		return common + " Show the protagonist taking the first real step. Keep the action small and easy to follow."
+		return common + " Show the protagonist taking the first real step toward the same main problem. Keep the action small and easy to follow."
 	case 4:
-		return common + " Add an early obstacle, misunderstanding, or playful surprise. The problem should grow naturally from the earlier pages."
+		return common + " Add an early obstacle, misunderstanding, or playful surprise. The problem should grow naturally from the earlier pages. Do NOT introduce a different main problem."
 	case 5:
-		return common + " Give the protagonist a useful discovery, helper, tool, or lesson. This is the middle of the journey, not the ending."
+		return common + " Give the protagonist a useful discovery, helper, tool, or lesson that helps with the same main problem. This is the middle of the journey, not the ending."
 	case 6:
-		return common + " Show a meaningful obstacle, turning point, or breakthrough. If the story may end naturally here because one brave, kind, or clever action can fully solve the main problem, do it now, end warmly, and set story_complete to true. Do NOT save the ending for page 10 just because more pages are available. Otherwise use this page to prepare the final stretch."
+		return common + " Show a meaningful obstacle, turning point, or breakthrough connected to the same main problem. If the story may end naturally here because one brave, kind, or clever action can fully solve the main problem, do it now, end warmly, and set story_complete to true. Do NOT save the ending for page 10 just because more pages are available. Otherwise use this page to prepare the final stretch without starting a new problem."
 	case 7:
-		return common + " Let the protagonist try again with more bravery, kindness, or teamwork. If the main problem becomes fully solved in a satisfying way here, end the story now and set story_complete to true. Do NOT hold back a finished ending for later pages. Otherwise keep moving toward the ending."
+		return common + " Let the protagonist try again with more bravery, kindness, or teamwork on the same main problem. If the main problem becomes fully solved in a satisfying way here, end the story now and set story_complete to true. Do NOT hold back a finished ending for later pages. Otherwise keep moving toward the ending."
 	case 8:
-		return common + " Present a strong child-safe obstacle or turning point before the ending. If the story naturally resolves here after that turning point, end fully, add a warm landing, and set story_complete to true. Do NOT stretch a solved story to page 10. Otherwise keep building toward the ending."
+		return common + " Present a strong child-safe obstacle or turning point before the ending. It must still belong to the same main problem. If the story naturally resolves here after that turning point, end fully, add a warm landing, and set story_complete to true. Do NOT stretch a solved story to page 10. Otherwise keep building toward the ending."
 	case 9:
-		return common + " Begin or complete the solution. If the main problem is fully resolved here, set story_complete to true and end warmly without leaving anything hanging. Do NOT end this page with only a clue, realization, or plan if the solution can already happen now."
+		return common + " Begin or complete the solution to the same main problem. If the main problem is fully resolved here, set story_complete to true and end warmly without leaving anything hanging. Do NOT end this page with only a clue, realization, or plan if the solution can already happen now."
 	case 10:
-		return common + " This is the final page. Fully solve the problem on this page, show the solution actually happening, give a happy and satisfying ending, add a calm landing, state a gentle moral lesson, and set story_complete to true. Do NOT end with only a realization, clue, or future plan. Do NOT ask a question at the end."
+		return common + " This is the final page. Fully solve the same main problem on this page, show the solution actually happening, give a happy and satisfying ending, add a calm landing, state a gentle moral lesson, and set story_complete to true. Do NOT end with only a realization, clue, or future plan. Do NOT ask a question at the end."
 	default:
-		return common + " Keep the story smooth, child-safe, and connected to the previous page."
+		return common + " Keep the story smooth, child-safe, connected to the previous page, and focused on the same main problem."
 	}
 }
 
