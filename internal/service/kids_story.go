@@ -451,7 +451,7 @@ func BuildKidsImagePrompt(imageScene, visualSetting string, entities interface{}
 	if setting == "" {
 		setting = fmt.Sprintf("consistent %s environment with stable background details and a child-safe atmosphere", strings.ToLower(genre))
 	}
-	return fmt.Sprintf("A single full-bleed children's watercolor illustration. One camera angle. One continuous environment. One uninterrupted composition. Everything exists in one physical space. Depict one freeze-frame moment in time. No split composition or multiple scenes. Editorial children's illustration, warm Malaysian watercolor style, age %d, no text, no letters, no numbers, no scary imagery. Maintain consistent character designs and environment. Characters: %s. Setting: %s. Scene: %s.", age, characters, setting, scene)
+	return fmt.Sprintf("A single full-bleed children's watercolor illustration. One camera angle. One continuous environment. One uninterrupted composition. Everything exists in one physical space. Depict one freeze-frame moment in time. Follow the scene literally. Preserve exact object placement and spatial relationships exactly as written. If something is under, on, inside, behind, beside, between, near, or in front of something else, keep it in that exact position. Do not move important objects to a different place. No split composition or multiple scenes. Editorial children's illustration, warm Malaysian watercolor style, age %d, no text, no letters, no numbers, no scary imagery. Maintain consistent character designs and environment. Characters: %s. Setting: %s. Scene: %s.", age, characters, setting, scene)
 }
 
 func kidsCharacterVisuals(entities interface{}) string {
@@ -522,7 +522,7 @@ func kidsSceneAction(storyText string) string {
 }
 
 func kidsSingleMomentScene(imageScene string) string {
-	clean := cleanPromptPart(imageScene, 220)
+	clean := cleanPromptPart(imageScene, 320)
 	if clean == "" {
 		return ""
 	}
@@ -548,7 +548,7 @@ func kidsSingleMomentScene(imageScene string) string {
 			break
 		}
 	}
-	return cleanPromptPart(first, 140)
+	return cleanPromptPart(first, 220)
 }
 
 func cleanPromptPart(text string, maxLen int) string {

@@ -205,6 +205,20 @@ func TestKidsImagePromptUsesCharacterAppearanceNotFullStoryDump(t *testing.T) {
 	}
 }
 
+func TestKidsImagePromptPreservesSpatialRelationships(t *testing.T) {
+	imageScene := "A small red box sits under the wooden chair beside a reading table. A young boy points at it with a surprised face."
+	prompt := BuildKidsImagePrompt(imageScene, "cozy reading corner with warm afternoon light", nil, "Persahabatan", 6)
+	for _, want := range []string{
+		"Preserve exact object placement and spatial relationships exactly as written",
+		"If something is under, on, inside, behind, beside, between, near, or in front of something else, keep it in that exact position",
+		"under the wooden chair beside a reading table",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing spatial cue %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestKidsSingleMomentSceneKeepsOnlyFirstVisualBeat(t *testing.T) {
 	scene := "A girl kneels in the grass beside a bench and looks under it. Then her friend points toward a shiny object near the tree. Warm afternoon light."
 	got := kidsSingleMomentScene(scene)
@@ -215,5 +229,13 @@ func TestKidsSingleMomentSceneKeepsOnlyFirstVisualBeat(t *testing.T) {
 		if strings.Contains(got, bad) {
 			t.Fatalf("expected later beat %q to be removed, got %q", bad, got)
 		}
+	}
+}
+
+func TestKidsSingleMomentSceneKeepsImportantLateSpatialPhrase(t *testing.T) {
+	scene := "A curious boy in a blue shirt crouches and looks carefully at a tiny old box hidden under the wooden chair near the bookshelf."
+	got := kidsSingleMomentScene(scene)
+	if !strings.Contains(got, "under the wooden chair near the bookshelf") {
+		t.Fatalf("expected spatial phrase to remain, got %q", got)
 	}
 }
