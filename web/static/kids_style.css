@@ -456,26 +456,63 @@ body.kids-mode {
         min-height: 0;
     }
     .fun-choices button {
-        font-size: 1.2em;
-        padding: 14px 18px;
+        font-size: 1.05em;
+        padding: 10px 16px;
+        min-height: 48px;
+    }
+    .fun-choices {
+        gap: 6px;
+        padding: 2px 0 8px;
     }
     .story-main {
         flex-direction: row;
         gap: 20px;
+        align-items: stretch;
+        flex: 1 1 0;
         min-height: 0;
         overflow: hidden;
     }
     .story-left {
-        flex: 0 0 44%;
+        flex: 0 0 40%;
         min-height: 0;
+        overflow: hidden;
     }
     .init-form,
     .genre-section {
         overflow: hidden;
     }
+    .game-screen {
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        overflow: hidden;
+        gap: 10px;
+    }
+    .game-header {
+        padding: 0;
+        gap: 4px 12px;
+    }
+    .fun-chapter {
+        font-size: 1.25em;
+    }
+    .turn-indicator {
+        font-size: 0.8em;
+    }
     .story-image-frame {
         flex: 1;
-        min-height: 460px;
+        min-height: 0;
+        height: 100%;
+        max-height: clamp(240px, 40vh, 400px);
+    }
+    .story-image {
+        object-fit: contain;
+    }
+    .choice-num {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        font-size: 0.8em;
     }
 }
 
